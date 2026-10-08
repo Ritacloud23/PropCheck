@@ -32,7 +32,7 @@ Decisions made while building the MVP, with the reasoning, so they can be revisi
 
 ## Seed data
 
-`python -m app.seed` creates 5 staff/renter/landlord accounts, 7 agents (5 verified, 1 pending, 1 suspended), 16 listings across Lagos, Port Harcourt, Enugu, Awka/Onitsha and Owerri (9 verified through the real state machine, others in review), inspection slots, a house-search request, an open report and ~330 fictional nearby places. Photos are generated PNG placeholders (no external downloads). Password for all accounts: `PropCheck2026`.
+`python -m app.seed` creates 4 renters, 1 landlord, 2 reviewers, 1 admin and 7 agents (5 verified, 1 pending, 1 suspended); 16 listings across Lagos, Port Harcourt, Enugu, Awka/Onitsha and Owerri (10 verified, 5 awaiting review, 1 rejected with a failed check); inspection slots and bookings; test reservations in every state; house-search requests with agent enquiries; reports that are open, resolved and rejected; and about 330 fictional nearby places. Every status is reached through the real state machine, so the audit log looks like production data. Photos are generated PNG placeholders (no external downloads). Password for all accounts: `PropCheck2026`.
 
 ## Five-state launch & nearby places (2026-10-06)
 
@@ -41,6 +41,13 @@ Decisions made while building the MVP, with the reasoning, so they can be revisi
 - **Nearby places use seeded PostgreSQL data behind a provider interface.** Demos are predictable and work offline. Distance uses Haversine after an indexed bounding-box prefilter, which needs no PostGIS. The radius is capped at 10 km and results at 50.
 - **Nothing implies nearby places are verified.** Demo rows are labelled, and every view carries the convenience notice. Wrong data is handled through `place_report` and the reviewer queue.
 - **Directions use Google Maps URLs** (`/maps/dir/?api=1`), which open the Maps app on phones; tiles remain OpenStreetMap.
+
+## Brief alignment (2026-10-07)
+
+- **The five-state launch stays.** The original brief targeted Lagos and FCT, with seed data in Oyo and Kaduna. The later five-state decision supersedes it.
+- **Brief paths are now canonical:** `/api/properties/{id}/inspection-slots`, `/dashboard/renter/house-search` (plus `[id]`), `/dashboard/agent/inspection-slots`, `/dashboard/agent/verification` and `/dashboard/reviewer/audit-log`. Old URLs stay as a hidden API alias and permanent redirects, so existing links keep working.
+- **No shadcn/ui.** The app keeps its own small component set in `components/ui.tsx`, which already covers what the pages need. Moving now would rewrite every page with no change in behaviour.
+- **The seed covers every workflow state** so each reviewer queue and dashboard has something to show. `tests/test_seed.py` runs the seed inside a rolled-back transaction to keep it working.
 
 ## Not built (deliberately)
 

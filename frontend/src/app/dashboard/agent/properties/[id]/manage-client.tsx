@@ -115,7 +115,7 @@ export function SlotCreator({ propertyId }: { propertyId: number }) {
     if (!date) return;
     const start = new Date(`${date}T${time}`);
     const end = new Date(start.getTime() + minutes * 60_000);
-    run(() => post(`/api/properties/${propertyId}/slots`, { start_time: start.toISOString(), end_time: end.toISOString() }));
+    run(() => post(`/api/properties/${propertyId}/inspection-slots`, { start_time: start.toISOString(), end_time: end.toISOString() }));
   };
   return (
     <div className="space-y-3">

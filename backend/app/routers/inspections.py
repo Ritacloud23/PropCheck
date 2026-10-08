@@ -48,7 +48,8 @@ def _booking_out(session, booking: InspectionBooking, viewer: User) -> BookingOu
 # ---------------------------------------------------------------- slots
 
 
-@router.get("/api/properties/{property_id}/slots", response_model=list[SlotOut])
+@router.get("/api/properties/{property_id}/inspection-slots", response_model=list[SlotOut])
+@router.get("/api/properties/{property_id}/slots", response_model=list[SlotOut], include_in_schema=False)
 def list_slots(property_id: int, session: SessionDep, viewer: OptionalUser) -> list[InspectionSlot]:
     """Public: upcoming OPEN slots. Owner / listing agent: every slot."""
     prop = load_property(session, property_id)
@@ -60,7 +61,10 @@ def list_slots(property_id: int, session: SessionDep, viewer: OptionalUser) -> l
     return list(session.exec(query.order_by(col(InspectionSlot.start_time))).all())
 
 
-@router.post("/api/properties/{property_id}/slots", response_model=SlotOut, status_code=201)
+@router.post("/api/properties/{property_id}/inspection-slots", response_model=SlotOut, status_code=201)
+@router.post(
+    "/api/properties/{property_id}/slots", response_model=SlotOut, status_code=201, include_in_schema=False
+)
 def create_slot(property_id: int, body: SlotIn, user: ListerUser, session: SessionDep) -> InspectionSlot:
     prop = load_property(session, property_id)
     require_manager(session, prop, user)

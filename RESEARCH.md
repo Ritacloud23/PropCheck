@@ -40,6 +40,71 @@ Working notes behind the MVP's scope. These are **assumptions to validate** with
 - Real payments or escrow.
 - Automated or AI approval of documents. If added later, AI may only assist reviewers.
 
+## Research log (to complete)
+
+Nothing below has been gathered yet. Fill each item in from real sessions and sources. Do not paraphrase from memory or invent quotes, prices or statistics.
+
+### Renter interviews
+
+| # | Who (role, city; no names) | Date | Key findings | Quote (with consent) |
+|---|---|---|---|---|
+| R1 | TODO | TODO | TODO | TODO |
+| R2 | TODO | TODO | TODO | TODO |
+
+### Agent or landlord interviews
+
+| # | Who (role, city; no names) | Date | Key findings | Willingness to share an authority letter |
+|---|---|---|---|---|
+| A1 | TODO | TODO | TODO | TODO |
+| A2 | TODO | TODO | TODO | TODO |
+
+### Competitors and workarounds
+
+| # | Product or workaround | What it does | Gap PropCheck addresses | Source / date checked |
+|---|---|---|---|---|
+| C1 | TODO | TODO | TODO | TODO |
+| C2 | TODO | TODO | TODO | TODO |
+
+Do not record competitor prices unless they are taken from a dated, cited source.
+
+### Cited sources
+
+1. TODO: source on Nigerian rental practice (fees, upfront rent).
+2. TODO: source on rental fraud patterns or consumer complaints.
+3. TODO: source on agent regulation or registration in a launch state.
+
+### Nigerian rental and verification considerations to research
+
+- TODO: which agent registrations or licences (state-level or professional bodies) can reasonably be checked in each launch state.
+- TODO: what an "authority to let" usually looks like in practice, and who issues it.
+- TODO: the legal limits of a platform describing a property as "verified"; get legal review before scaling.
+- TODO: data-protection obligations for storing ID documents (NDPA 2023); confirm with counsel.
+
+### Paystack documentation
+
+The MVP uses test mode only (`sk_test_…`; live keys are refused at startup). To review and record what was confirmed, with dates:
+
+- TODO: Accept Payments / Initialize Transaction: https://paystack.com/docs/api/transaction/
+- TODO: Test payments and test cards: https://paystack.com/docs/payments/test-payments/
+- TODO: Webhooks and signature verification: https://paystack.com/docs/payments/webhooks/
+- TODO: whether a split, subaccount or licensed escrow partner is needed for any real "pay on keys" flow.
+
+### Design decisions based on the research
+
+Each line should be completed once evidence exists, or the decision reversed.
+
+1. TODO: separate agent and property badges. Evidence: …
+2. TODO: authority to market is mandatory. Evidence: …
+3. TODO: WhatsApp-first contact, shown only with consent. Evidence: …
+
+### Technical spike: riskiest integration
+
+**Question:** can a reservation be paid, released or refunded exactly once, even with retries and concurrent requests?
+
+**What exists:** a payment-provider interface (`app/services/payments.py`) with a simulator and a Paystack test-mode provider; row locking plus a data-driven state machine; tests for duplicate pay, release and refund (`tests/test_reservations.py`); and `scripts/e2e_journey.py`, which runs the full journey against a live stack.
+
+**Still TODO:** run the Paystack provider against a real test-mode account (initialize, then verify with a test card), record the result here, and confirm webhook handling before any non-test use.
+
 ## Next research steps
 
 - 10–15 renter interviews (recent movers in each launch city): how they found the place, what they paid, what went wrong.

@@ -16,7 +16,7 @@ export default async function RenterHome() {
   ]);
   const upcoming = bookings.filter((b) => ["REQUESTED", "CONFIRMED"].includes(b.status));
   const stats = [
-    { label: "Open requests", value: requests.filter((r) => !["COMPLETED", "CANCELLED"].includes(r.status)).length, href: "/dashboard/renter/requests" },
+    { label: "Open requests", value: requests.filter((r) => !["COMPLETED", "CANCELLED"].includes(r.status)).length, href: "/dashboard/renter/house-search" },
     { label: "Upcoming inspections", value: upcoming.length, href: "/dashboard/renter/bookings" },
     { label: "Active reservations", value: reservations.filter((r) => r.status.startsWith("PENDING")).length, href: "/dashboard/renter/reservations" },
   ];

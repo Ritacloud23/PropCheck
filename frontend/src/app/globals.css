@@ -7,7 +7,25 @@
   --color-brand-600: #15803d;
   --color-brand-700: #166534;
   --color-brand-800: #14532d;
+  --color-brand-900: #10372a;
+  --color-accent: #bef264;
   --color-ink: #0f172a;
+  /* Landing hero palette */
+  --color-cream: #f7f8ef;
+  --color-forest: #183d32;
+  --color-deep: #13231f;
+  --color-highlight: #b8ef57;
+  --color-muted: #69756f;
+}
+
+/* Dark green scrim for text on the hero photo: strong on the left, clear past the middle. */
+@utility hero-scrim {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-brand-900) 85%, transparent) 0%,
+    color-mix(in srgb, var(--color-brand-900) 75%, transparent) 45%,
+    transparent 75%
+  );
 }
 
 @layer base {

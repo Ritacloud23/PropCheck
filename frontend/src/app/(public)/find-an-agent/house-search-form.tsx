@@ -40,7 +40,7 @@ export function HouseSearchForm({ reference, user }: { reference: ReferenceData;
         <p>
           PropCheck will match you with a verified agent who covers {created.city}. Only that agent will see your request.
           Track progress in{" "}
-          <Link href="/dashboard/renter/requests" className="font-semibold underline">
+          <Link href="/dashboard/renter/house-search" className="font-semibold underline">
             your dashboard
           </Link>
           .

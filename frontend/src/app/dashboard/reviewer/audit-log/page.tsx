@@ -8,7 +8,7 @@ const ENTITY_TYPES = [
   "InspectionBooking", "HouseSearchRequest", "Reservation", "AgentReport", "User",
 ];
 
-export default async function AuditLogPage(props: PageProps<"/dashboard/reviewer/audit">) {
+export default async function AuditLogPage(props: PageProps<"/dashboard/reviewer/audit-log">) {
   const sp = await props.searchParams;
   const entityType = typeof sp.entity_type === "string" && ENTITY_TYPES.includes(sp.entity_type) ? sp.entity_type : "";
   const entityId = typeof sp.entity_id === "string" && /^\d+$/.test(sp.entity_id) ? sp.entity_id : "";

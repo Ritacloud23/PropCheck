@@ -88,7 +88,8 @@ export function stateLabel(state: string): string {
 /** "Lekki, Lagos" — the most specific place name we have, then the state. */
 export function placeLabel(p: { area?: string | null; city: string; state: string }): string {
   const local = p.area && p.area !== p.city ? `${p.area}, ${p.city}` : p.city;
-  return local === p.state ? local : `${local}, ${stateLabel(p.state)}`;
+  // Enugu city is in Enugu state: "GRA, Enugu", not "GRA, Enugu, Enugu".
+  return p.city === p.state ? local : `${local}, ${stateLabel(p.state)}`;
 }
 
 /** Under 1 km: metres (nearest 10 m). 1 km or more: kilometres to one decimal place. */

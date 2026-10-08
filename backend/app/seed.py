@@ -8,19 +8,24 @@ import random
 import struct
 import zlib
 from datetime import timedelta
+from pathlib import Path
 
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db import engine
 from app.models import (
+    AgentEnquiry,
     AgentProfile,
     AgentReport,
     AgentVerification,
     HouseSearchRequest,
+    InspectionBooking,
     InspectionSlot,
     Property,
     PropertyDocument,
     PropertyMedia,
+    Reservation,
     User,
     VerificationCase,
     VerificationCheck,
@@ -32,18 +37,28 @@ from app.models.enums import (
     CheckType,
     DocumentReviewStatus,
     DocumentType,
+    EnquiryStatus,
+    FurnishedPreference,
     PropertyType,
     ReportReason,
     Role,
+    SlotStatus,
     VerificationStatus,
 )
 from app.reference import find_area
 from app.security import hash_password
 from app.seed_nearby import seed_nearby_places
 from app.services import audit, storage
-from app.services.fees import total_move_in_cost
+from app.services.fees import reservation_deposit, total_move_in_cost
 from app.services.state_machine import transition
-from app.services.workflows import AGENT_VERIFICATION, VERIFICATION_CASE
+from app.services.workflows import (
+    AGENT_REPORT,
+    AGENT_VERIFICATION,
+    HOUSE_SEARCH,
+    INSPECTION_BOOKING,
+    RESERVATION,
+    VERIFICATION_CASE,
+)
 
 DEMO_PASSWORD = "PropCheck2026"
 PDF = b"%PDF-1.4\n% PropCheck demo document - not a real document\n%%EOF\n"
@@ -143,6 +158,16 @@ PROPERTIES = [
     (6, "2-bedroom flat in Ikenegbu Layout", "Imo", "Owerri", "Ikenegbu", "FLAT", 2, 1_500_000, False, "Off Okigwe Road, Ikenegbu"),
 ]  # fmt: skip
 
+# Real interior photos (in app/seed_assets) used as the cover of some demo listings; the rest get
+# generated placeholders. The home-page hero card shows listing 7 (Enugu GRA duplex).
+SEED_ASSETS = Path(__file__).parent / "seed_assets"
+REAL_PHOTOS = {7: ("enugu-gra-dining.jpg", "Dining area and staircase")}
+
+# Listings whose verification case a reviewer rejects, with the reason shown on the report.
+REJECTED_LISTINGS = {
+    14: "Photos showed a different building from the one inspected, and the authority letter did not name the agent."
+}
+
 
 def _user(session: Session, name: str, email: str, role: Role, phone: str | None = None) -> User:
     user = User(
@@ -151,6 +176,207 @@ def _user(session: Session, name: str, email: str, role: Role, phone: str | None
     session.add(user)
     session.flush()
     return user
+
+
+def _seed_bookings(session: Session, props, slots, profiles, renters: list[User]) -> None:
+    """One inspection request waiting for the agent, one already confirmed."""
+    for renter, prop_idx, note, confirm in (
+        (renters[0], 0, "Can I come with my sister? We'd like to check the water pressure.", False),
+        (renters[1], 3, "I'm a student at UNILAG; mornings work best.", True),
+    ):
+        prop = props[prop_idx]
+        slot = slots[prop.id][0]
+        booking = InspectionBooking(
+            property_id=prop.id, slot_id=slot.id, renter_id=renter.id, renter_note=note
+        )
+        slot.status = SlotStatus.BOOKED
+        session.add_all([slot, booking])
+        session.flush()
+        audit.record(
+            session, actor_id=renter.id, entity_type="InspectionBooking", entity_id=booking.id,
+            action="BOOKING_REQUESTED", to_status="REQUESTED", metadata={"slot_id": slot.id, "property_id": prop.id},
+        )  # fmt: skip
+        if confirm:
+            agent_user = session.get(User, profiles[PROPERTIES[prop_idx][0]].user_id)
+            transition(
+                session, INSPECTION_BOOKING, booking.id, "CONFIRMED", agent_user,
+                metadata={"landlord_note": "Confirmed. Call me when you reach the estate gate."},
+            )  # fmt: skip
+
+
+def _seed_reservations(session: Session, props, renters: list[User], reviewer: User) -> None:
+    """TEST/DEMO reservations: released, refunded, awaiting keys and awaiting payment."""
+
+    def reserve(renter: User, prop: Property) -> Reservation:
+        res = Reservation(
+            property_id=prop.id,  # type: ignore[arg-type]
+            renter_id=renter.id,  # type: ignore[arg-type]
+            amount=reservation_deposit(prop.rent_amount),
+            terms_version=settings.reservation_terms_version,
+        )
+        session.add(res)
+        session.flush()
+        audit.record(
+            session, actor_id=renter.id, entity_type="Reservation", entity_id=res.id,  # type: ignore[arg-type]
+            action="RESERVATION_CREATED", to_status=res.status.value,
+            metadata={"property_id": prop.id, "amount": res.amount, "terms_version": res.terms_version, "test_mode": True},
+        )  # fmt: skip
+        return res
+
+    def pay(res: Reservation, renter: User) -> None:
+        transition(
+            session, RESERVATION, res.id, "PENDING_RELEASE", renter,  # type: ignore[arg-type]
+            metadata={"payment_reference": f"PCDEMO-{res.id:05d}", "payment_provider": "simulated", "test_mode": True},
+        )  # fmt: skip
+
+    renter, renter2, renter3, renter4 = renters
+    released = reserve(renter, props[12])
+    pay(released, renter)
+    transition(session, RESERVATION, released.id, "RELEASED", renter)  # type: ignore[arg-type]
+
+    refunded = reserve(renter2, props[13])
+    pay(refunded, renter2)
+    refunded.refund_requested_at = utcnow()
+    refunded.refund_request_reason = (
+        "Landlord asked for an extra 'documentation fee' that was not on the listing."
+    )
+    session.add(refunded)
+    audit.record(
+        session, actor_id=renter2.id, entity_type="Reservation", entity_id=refunded.id,  # type: ignore[arg-type]
+        action="REFUND_REQUESTED", reason=refunded.refund_request_reason,
+    )  # fmt: skip
+    transition(
+        session, RESERVATION, refunded.id, "REFUNDED", reviewer,  # type: ignore[arg-type]
+        reason="Unlisted fee requested after payment; test deposit returned.",
+    )  # fmt: skip
+
+    pay(reserve(renter4, props[8]), renter4)  # awaiting keys
+    reserve(renter3, props[4])  # awaiting payment
+
+
+def _seed_requests(session: Session, profiles, renters: list[User], reviewer: User) -> None:
+    """House-search requests: new, assigned (no reply yet), contacted (agent replied) and cancelled."""
+    renter, renter2, renter3, renter4 = renters
+
+    def request(renter: User, **fields) -> HouseSearchRequest:
+        req = HouseSearchRequest(
+            renter_id=renter.id,  # type: ignore[arg-type]
+            name=renter.full_name,
+            phone=renter.phone or "",
+            whatsapp_number=renter.phone,
+            email=renter.email,
+            consent_to_share=True,
+            **fields,
+        )
+        session.add(req)
+        session.flush()
+        audit.record(
+            session, actor_id=renter.id, entity_type="HouseSearchRequest", entity_id=req.id,  # type: ignore[arg-type]
+            action="REQUEST_SUBMITTED", to_status=req.status.value,
+        )  # fmt: skip
+        return req
+
+    def assign(req: HouseSearchRequest, agent: AgentProfile) -> AgentEnquiry:
+        transition(session, HOUSE_SEARCH, req.id, "MATCHING", reviewer)  # type: ignore[arg-type]
+        transition(session, HOUSE_SEARCH, req.id, "ASSIGNED", reviewer, metadata={"agent_id": agent.id})  # type: ignore[arg-type]
+        enquiry = AgentEnquiry(house_search_request_id=req.id, agent_id=agent.id)  # type: ignore[arg-type]
+        session.add(enquiry)
+        session.flush()
+        return enquiry
+
+    request(
+        renter, state="Lagos", city="Lagos", area="Yaba", local_government_area="Lagos Mainland",
+        property_type=PropertyType.MINI_FLAT, bedrooms=1, budget_min=800_000, budget_max=1_500_000,
+        description="Close to Yaba tech hub, need water and steady power.",
+    )  # fmt: skip
+    assign(
+        request(
+            renter3, state="Enugu", city="Enugu", area="Independence Layout", local_government_area="Enugu East",
+            property_type=PropertyType.FLAT, bedrooms=2, budget_min=1_500_000, budget_max=3_000_000,
+            preferred_move_in_date=(utcnow() + timedelta(days=45)).date(),
+            furnished_preference=FurnishedPreference.UNFURNISHED,
+            description="Relocating for a new job in January. Quiet street, space for one car.",
+        ),
+        profiles[2],
+    )  # fmt: skip
+    ph = request(
+        renter4, state="Rivers", city="Port Harcourt", area="GRA Phase 2", local_government_area="Port Harcourt",
+        property_type=PropertyType.FLAT, bedrooms=3, budget_min=3_000_000, budget_max=5_000_000,
+        description="Family of four moving from Lagos. Need a gated compound near a good school.",
+    )  # fmt: skip
+    enquiry = assign(ph, profiles[3])
+    agent_user = session.get(User, profiles[3].user_id)
+    enquiry.message = (
+        "Good afternoon. I have two verified 3-bedroom flats in GRA Phase 2 within your budget. "
+        "When can you inspect?"
+    )
+    enquiry.status = EnquiryStatus.RESPONDED
+    enquiry.responded_at = utcnow()
+    session.add(enquiry)
+    audit.record(
+        session, actor_id=agent_user.id, entity_type="HouseSearchRequest", entity_id=ph.id,  # type: ignore[union-attr,arg-type]
+        action="AGENT_RESPONDED", metadata={"enquiry_id": enquiry.id},
+    )  # fmt: skip
+    transition(session, HOUSE_SEARCH, ph.id, "CONTACTED", agent_user)  # type: ignore[arg-type]
+    cancelled = request(
+        renter2, state="Lagos", city="Lagos", area="Lekki", local_government_area="Eti-Osa",
+        property_type=PropertyType.SELF_CONTAINED, bedrooms=1, budget_min=900_000, budget_max=1_600_000,
+    )  # fmt: skip
+    transition(
+        session, HOUSE_SEARCH, cancelled.id, "CANCELLED", renter2, reason="Found a place through a friend."
+    )  # type: ignore[arg-type]
+
+
+def _seed_reports(
+    session: Session, props, profiles, renters: list[User], reviewer: User, reviewer2: User
+) -> None:
+    """Reports against agents and properties: two open, one resolved, one rejected."""
+    renter, renter2, renter3, renter4 = renters
+
+    def report(
+        reporter: User, agent: AgentProfile, reason: ReportReason, text: str, prop=None
+    ) -> AgentReport:
+        r = AgentReport(
+            reporter_id=reporter.id,  # type: ignore[arg-type]
+            agent_id=agent.id,
+            property_id=prop.id if prop else None,
+            reason=reason,
+            description=text,
+        )
+        session.add(r)
+        session.flush()
+        audit.record(
+            session, actor_id=reporter.id, entity_type="AgentReport", entity_id=r.id,  # type: ignore[arg-type]
+            action="REPORT_FILED", to_status=r.status.value,
+        )  # fmt: skip
+        return r
+
+    report(
+        renter2, profiles[5], ReportReason.PAYMENT_PRESSURE,
+        "Agent insisted on an 'inspection fee' transfer before showing the room.",
+    )  # fmt: skip
+    report(
+        renter3, profiles[0], ReportReason.UNEXPECTED_FEES,
+        "I was told on the phone that an 'agreement fee' is charged on top of the legal fee shown here.", props[2],
+    )  # fmt: skip
+    resolved = report(
+        renter4, profiles[1], ReportReason.MISLEADING_PHOTOS,
+        "The kitchen photo on the Surulere listing looks newer than what I saw at inspection.", props[5],
+    )  # fmt: skip
+    transition(session, AGENT_REPORT, resolved.id, "IN_REVIEW", reviewer)  # type: ignore[arg-type]
+    transition(
+        session, AGENT_REPORT, resolved.id, "RESOLVED", reviewer,  # type: ignore[arg-type]
+        reason="Agent replaced the outdated kitchen photo; the listing stays unverified until inspection.",
+        metadata={"reviewer_notes": "Called the renter and the agent on the same day."},
+    )  # fmt: skip
+    rejected = report(
+        renter, profiles[3], ReportReason.FAKE_IDENTITY,
+        "I could not find this agency online, so I think it may be fake.",
+    )  # fmt: skip
+    transition(
+        session, AGENT_REPORT, rejected.id, "REJECTED", reviewer2,  # type: ignore[arg-type]
+        reason="Identity and CAC registration were re-checked and match; no other evidence was provided.",
+    )  # fmt: skip
 
 
 def seed() -> None:
@@ -168,6 +394,8 @@ def seed() -> None:
         reviewer2 = _user(session, "Ibinabo Reviewer", "reviewer2@propcheck.ng", Role.REVIEWER)
         renter = _user(session, "Chioma Eze", "renter@propcheck.ng", Role.RENTER, "+2348035550001")
         renter2 = _user(session, "Obinna Nwankwo", "renter2@propcheck.ng", Role.RENTER, "+2348035550002")
+        renter3 = _user(session, "Ifeoma Chukwu", "renter3@propcheck.ng", Role.RENTER, "+2348035550004")
+        renter4 = _user(session, "Babajide Ogunleye", "renter4@propcheck.ng", Role.RENTER, "+2348035550005")
         landlord = _user(
             session, "Chief Olumide Balogun", "landlord@propcheck.ng", Role.LANDLORD, "+2348035550003"
         )
@@ -268,6 +496,11 @@ def seed() -> None:
             )
             session.add(prop)
             session.flush()
+            if i in REAL_PHOTOS:
+                filename, caption = REAL_PHOTOS[i]
+                url = storage.save_public_bytes((SEED_ASSETS / filename).read_bytes(), "seed", ".jpg")
+                session.add(PropertyMedia(property_id=prop.id, url=url, caption=caption))  # type: ignore[arg-type]
+                session.flush()  # first photo by id is the cover
             for k in range(3):
                 session.add(
                     PropertyMedia(
@@ -305,6 +538,26 @@ def seed() -> None:
                 session.add(VerificationCheck(verification_case_id=case.id, check_type=ct))  # type: ignore[arg-type]
             session.flush()
             transition(session, VERIFICATION_CASE, case.id, "SUBMITTED", agent_user)  # type: ignore[arg-type]
+            if i in REJECTED_LISTINGS:
+                transition(session, VERIFICATION_CASE, case.id, "IN_REVIEW", reviewer2)  # type: ignore[arg-type]
+                photos = session.exec(
+                    select(VerificationCheck).where(
+                        VerificationCheck.verification_case_id == case.id,
+                        VerificationCheck.check_type == CheckType.PHOTOS_MATCH_INSPECTION,
+                    )
+                ).one()
+                photos.result = CheckResult.FAILED
+                photos.evidence_note = "Listing photos do not match the building at the inspected address."
+                photos.completed_by = reviewer2.id
+                photos.completed_at = utcnow()
+                doc.review_status = DocumentReviewStatus.REJECTED
+                doc.reviewer_notes = "Letter is unsigned and names a different agency."
+                doc.reviewed_at = utcnow()
+                session.add_all([photos, doc])
+                transition(
+                    session, VERIFICATION_CASE, case.id, "REJECTED", reviewer2, reason=REJECTED_LISTINGS[i]
+                )  # type: ignore[arg-type]
+                continue
             if not verify:
                 if i % 2 == 0:
                     transition(session, VERIFICATION_CASE, case.id, "IN_REVIEW", reviewer)  # type: ignore[arg-type]
@@ -349,46 +602,27 @@ def seed() -> None:
             )  # type: ignore[arg-type]
 
         # Inspection slots for the next week on verified listings.
+        slots: dict[int, list[InspectionSlot]] = {}
         for prop in props:
             if prop.verification_status.value != VerificationStatus.VERIFIED.value:
                 continue
             base = (utcnow() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
             for d in range(0, 6, 2):
                 start = base + timedelta(days=d)
-                session.add(
-                    InspectionSlot(
-                        property_id=prop.id,
-                        landlord_user_id=prop.owner_user_id,
-                        start_time=start,
-                        end_time=start + timedelta(hours=1),
-                    )
-                )  # type: ignore[arg-type]
+                slot = InspectionSlot(
+                    property_id=prop.id,  # type: ignore[arg-type]
+                    landlord_user_id=prop.owner_user_id,
+                    start_time=start,
+                    end_time=start + timedelta(hours=1),
+                )
+                session.add(slot)
+                slots.setdefault(prop.id, []).append(slot)  # type: ignore[arg-type]
+        session.flush()
 
-        session.add(
-            HouseSearchRequest(
-                renter_id=renter.id,  # type: ignore[arg-type]
-                name=renter.full_name,
-                phone=renter.phone or "+2348035550001",
-                state="Lagos",
-                city="Lagos",
-                area="Yaba",
-                local_government_area="Lagos Mainland",
-                property_type=PropertyType.MINI_FLAT,
-                bedrooms=1,
-                budget_min=800_000,
-                budget_max=1_500_000,
-                description="Close to Yaba tech hub, need water and steady power.",
-                consent_to_share=True,
-            )
-        )
-        session.add(
-            AgentReport(
-                reporter_id=renter2.id,  # type: ignore[arg-type]
-                agent_id=profiles[5].id,
-                reason=ReportReason.PAYMENT_PRESSURE,
-                description="Agent insisted on an 'inspection fee' transfer before showing the room.",
-            )
-        )
+        _seed_bookings(session, props, slots, profiles, [renter, renter3])
+        _seed_reservations(session, props, [renter, renter2, renter3, renter4], reviewer2)
+        _seed_requests(session, profiles, [renter, renter2, renter3, renter4], reviewer)
+        _seed_reports(session, props, profiles, [renter, renter2, renter3, renter4], reviewer, reviewer2)
         session.commit()
 
     print("Seeded PropCheck demo data. Password for every account:", DEMO_PASSWORD)

@@ -13,7 +13,7 @@ export default function AboutPage() {
       <div className="space-y-5 text-slate-700">
         <p>
           Renting in Lagos, Port Harcourt, Enugu, Awka or Owerri too often means paying a year&apos;s rent, plus agency, legal and caution fees, to
-          someone you met online — before you can be sure they are allowed to let the property, or that it exists as
+          someone you met online - before you can be sure they are allowed to let the property, or that it exists as
           advertised.
         </p>
         <p>

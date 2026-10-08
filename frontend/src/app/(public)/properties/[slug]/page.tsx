@@ -44,7 +44,7 @@ export default async function PropertyPage(props: PageProps<"/properties/[slug]"
   const hasLocation = p.latitude !== null && p.longitude !== null;
   const [report, slots, terms, nearby, reference] = await Promise.all([
     serverApi<Report>(`/api/properties/${p.id}/verification-report`, { auth: false }),
-    serverApi<Slot[]>(`/api/properties/${p.id}/slots`, { auth: false }).catch(() => []),
+    serverApi<Slot[]>(`/api/properties/${p.id}/inspection-slots`, { auth: false }).catch(() => []),
     serverApi<{ terms: string[]; amount: number | null }>(`/api/reservations/terms?property_id=${p.id}`, { auth: false }),
     hasLocation
       ? serverApi<NearbyResponse>(

@@ -9,23 +9,25 @@ import type { Role } from "@/lib/types";
 const NAV: Record<Role, NavItem[]> = {
   RENTER: [
     { href: "/dashboard/renter", label: "Overview" },
-    { href: "/dashboard/renter/requests", label: "House-search requests" },
+    { href: "/dashboard/renter/house-search", label: "House-search requests" },
     { href: "/dashboard/renter/bookings", label: "Inspections" },
     { href: "/dashboard/renter/reservations", label: "Reservations" },
     { href: "/dashboard/renter/reports", label: "My reports" },
   ],
   AGENT: [
     { href: "/dashboard/agent", label: "Overview" },
-    { href: "/dashboard/agent/profile", label: "Profile & verification" },
+    { href: "/dashboard/agent/profile", label: "Profile" },
+    { href: "/dashboard/agent/verification", label: "Verification" },
     { href: "/dashboard/agent/properties", label: "My listings" },
-    { href: "/dashboard/agent/bookings", label: "Inspection requests" },
+    { href: "/dashboard/agent/inspection-slots", label: "Inspections" },
     { href: "/dashboard/agent/enquiries", label: "Matched renters" },
     { href: "/dashboard/agent/reservations", label: "Reservations" },
   ],
   LANDLORD: [
     { href: "/dashboard/agent", label: "Overview" },
     { href: "/dashboard/agent/properties", label: "My properties" },
-    { href: "/dashboard/agent/bookings", label: "Inspection requests" },
+    { href: "/dashboard/agent/verification", label: "Verification" },
+    { href: "/dashboard/agent/inspection-slots", label: "Inspections" },
     { href: "/dashboard/agent/reservations", label: "Reservations" },
     { href: "/dashboard/agent/profile", label: "Public profile (optional)" },
   ],
@@ -37,7 +39,7 @@ const NAV: Record<Role, NavItem[]> = {
     { href: "/dashboard/reviewer/reports", label: "Reports" },
     { href: "/dashboard/reviewer/place-reports", label: "Nearby place reports" },
     { href: "/dashboard/reviewer/reservations", label: "Refunds" },
-    { href: "/dashboard/reviewer/audit", label: "Audit log" },
+    { href: "/dashboard/reviewer/audit-log", label: "Audit log" },
   ],
   ADMIN: [],
 };

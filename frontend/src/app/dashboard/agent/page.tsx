@@ -18,7 +18,7 @@ export default async function AgentHome() {
   const stats = [
     { label: "Listings", value: properties.length, href: "/dashboard/agent/properties" },
     { label: "Verified listings", value: verified, href: "/dashboard/agent/properties" },
-    { label: "Inspection requests to answer", value: bookings.length, href: "/dashboard/agent/bookings" },
+    { label: "Inspection requests to answer", value: bookings.length, href: "/dashboard/agent/inspection-slots" },
     ...(user.role === "AGENT"
       ? [{ label: "Matched renters waiting", value: enquiries.filter((e) => e.status === "PENDING").length, href: "/dashboard/agent/enquiries" }]
       : []),

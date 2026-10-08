@@ -83,6 +83,7 @@ describe("directions and labels", () => {
   it("prefers the area in place labels", () => {
     expect(placeLabel({ area: "GRA Phase 2", city: "Port Harcourt", state: "Rivers" })).toBe("GRA Phase 2, Port Harcourt, Rivers");
     expect(placeLabel({ area: null, city: "Enugu", state: "Enugu" })).toBe("Enugu");
+    expect(placeLabel({ area: "GRA", city: "Enugu", state: "Enugu" })).toBe("GRA, Enugu");
   });
 });
 

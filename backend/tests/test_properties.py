@@ -9,6 +9,19 @@ from app.services.fees import reservation_deposit, total_move_in_cost
 from tests.helpers import PDF, PNG, create_agent, create_property, make_user, verified_property
 
 
+def test_agent_creates_property_as_unverified_draft(client, session):
+    _, headers, profile = create_agent(client, session)
+    prop = create_property(client, headers)
+    assert prop["public_slug"] and prop["state"] == "Lagos"
+    assert prop["verification"]["status"] == "NOT_SUBMITTED"
+    row = session.get(Property, prop["id"])
+    assert row.listing_agent_id == profile["id"]
+    audit = session.exec(
+        select(AuditLog).where(AuditLog.entity_type == "Property", AuditLog.entity_id == prop["id"])
+    ).all()
+    assert [a.action for a in audit] == ["PROPERTY_CREATED"]
+
+
 def test_total_move_in_cost_computed_server_side(client, session):
     _, headers, _ = create_agent(client, session)
     prop = create_property(client, headers, total_move_in_cost=1)  # client value ignored

@@ -13,7 +13,7 @@ def _prop(client, session):
 
 def _slot(client, headers, pid, start_h=24, end_h=25):
     return client.post(
-        f"/api/properties/{pid}/slots",
+        f"/api/properties/{pid}/inspection-slots",
         json={"start_time": future(start_h), "end_time": future(end_h)},
         headers=headers,
     )
@@ -22,6 +22,7 @@ def _slot(client, headers, pid, start_h=24, end_h=25):
 def test_overlapping_slots_rejected(client, session):
     agent, prop = _prop(client, session)
     assert _slot(client, agent, prop["id"], 24, 25).status_code == 201
+    assert _slot(client, agent, prop["id"], 24, 25).status_code == 409  # exact duplicate
     assert _slot(client, agent, prop["id"], 24.5, 25.5).status_code == 409
     assert _slot(client, agent, prop["id"], 25, 26).status_code == 201  # touching is fine
 
@@ -48,7 +49,7 @@ def test_db_exclusion_constraint_blocks_overlap(client, session):
 def test_slot_validation(client, session):
     agent, prop = _prop(client, session)
     r = client.post(
-        f"/api/properties/{prop['id']}/slots",
+        f"/api/properties/{prop['id']}/inspection-slots",
         json={"start_time": future(5), "end_time": future(4)},
         headers=agent,
     )

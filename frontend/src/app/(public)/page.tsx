@@ -1,25 +1,16 @@
-import {
-  ArrowRight,
-  BadgeCheck,
-  CheckCircle2,
-  ClipboardCheck,
-  FileSearch,
-  HandCoins,
-  MapPin,
-  Search,
-  ShieldCheck,
-  UserCheck,
-} from "lucide-react";
+import { existsSync } from "node:fs";
+import path from "node:path";
+
+import { ArrowRight, BadgeCheck, ClipboardCheck, FileSearch, HandCoins, MapPin, UserCheck } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
-import { VerifiedPropertyBadge } from "@/components/badges";
 import { SafetyWarning } from "@/components/disclaimer";
 import { PropertyCard } from "@/components/property-card";
-import { buttonClass, Select } from "@/components/ui";
-import { formatNaira, placeLabel } from "@/lib/format";
-import { localMedia } from "@/lib/media";
-import { serverApi } from "@/lib/server-api";
+import { getReference, serverApi } from "@/lib/server-api";
 import type { Page, PropertyCard as PropertyCardT } from "@/lib/types";
+
+import { HeroSearch } from "./hero-search";
 
 async function featured(): Promise<PropertyCardT[]> {
   try {
@@ -51,137 +42,120 @@ function FeatureGrid() {
   );
 }
 
-// Every currently verified property passed these mandatory checks, so this list is always true.
-const HERO_CHECKS = ["Authority to let seen", "Location inspected", "Fees confirmed"];
-
-function HeroListing({ property: p }: { property: PropertyCardT }) {
-  const img = localMedia(p.cover_photo_url);
+// Illustrative marketing card with fixed copy. Its button opens real verified Port Harcourt listings,
+// each of which has a full report.
+function HeroPropertyCard() {
   return (
-    <div className="relative mx-auto w-full max-w-md lg:max-w-none">
-      <Link
-        href={`/properties/${p.public_slug}`}
-        className="group block overflow-hidden rounded-3xl bg-white shadow-2xl shadow-brand-900/10 ring-1 ring-slate-200 transition hover:-translate-y-1 lg:rotate-1 lg:hover:rotate-0"
-      >
-        <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-          {img && (
-            // eslint-disable-next-line @next/next/no-img-element -- media is served by the API / Cloudinary
-            <img src={img} alt={p.title} className="absolute inset-0 size-full object-cover transition group-hover:scale-105" />
-          )}
-          <div className="absolute left-4 top-4">
-            <VerifiedPropertyBadge status={p.verification.status} expiresAt={p.verification.expires_at} />
-          </div>
-        </div>
-        <div className="space-y-3 p-5">
-          <p className="text-2xl font-extrabold tabular-nums text-slate-900">
-            {formatNaira(p.rent_amount)}
-            <span className="text-sm font-normal text-slate-500"> /year</span>
-          </p>
-          <p className="font-semibold text-slate-900">{p.title}</p>
-          <p className="flex items-center gap-1 text-sm text-slate-600">
-            <MapPin className="size-4 shrink-0" aria-hidden /> {placeLabel(p)}
-          </p>
-          <ul className="grid gap-1.5 border-t border-slate-100 pt-3 text-sm text-slate-700">
-            {HERO_CHECKS.map((c) => (
-              <li key={c} className="flex items-center gap-2">
-                <CheckCircle2 className="size-4 text-green-600" aria-hidden /> {c}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </Link>
-      {p.agent?.is_verified && (
-        <div className="absolute -left-6 top-1/3 hidden items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-lg ring-1 ring-slate-200 sm:flex">
-          <BadgeCheck className="size-5 text-brand-600" aria-hidden />
-          <span>
-            <span className="block text-xs text-slate-500">Listed by</span>
-            <span className="font-semibold text-slate-900">Verified Agent</span>
-          </span>
-        </div>
-      )}
-      {p.verification.reference && (
-        <div className="absolute -right-3 -top-4 hidden rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-lg sm:block">
-          Report <span className="font-mono">{p.verification.reference}</span>
-        </div>
-      )}
+    <div className="w-full max-w-sm overflow-hidden rounded-3xl bg-white p-3 shadow-2xl shadow-black/25 lg:max-w-none">
+      <div className="px-1 pb-3 pt-1">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-highlight/30 px-2.5 py-1 text-xs font-bold text-forest ring-1 ring-highlight">
+          <BadgeCheck className="size-3.5" aria-hidden />
+          Verified property
+        </span>
+      </div>
+      <Image
+        src={HERO_CARD_PHOTO}
+        alt="Living room of a modern apartment"
+        width={1024}
+        height={455}
+        sizes="(min-width: 1024px) 320px, 384px"
+        className="h-auto w-full rounded-2xl bg-slate-100"
+      />
+      <div className="px-2 pb-2 pt-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted">NEW GRA, ENUGU</p>
+        <p className="mt-1.5 text-lg font-bold leading-snug text-deep">Modern 2-bedroom apartment</p>
+        <p className="mt-2 text-xl font-extrabold tabular-nums text-deep">
+          ₦2,400,000 <span className="text-sm font-medium text-muted">/ year</span>
+        </p>
+        <ul className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-xs font-medium text-muted">
+          <li className="flex items-center gap-2">
+            <BadgeCheck className="size-4 shrink-0 text-forest" aria-hidden /> Verified agent
+          </li>
+          <li className="flex items-center gap-2">
+            <ClipboardCheck className="size-4 shrink-0 text-forest" aria-hidden /> Inspected recently
+          </li>
+          <li className="flex items-center gap-2">
+            {/* Non-breaking spaces keep each distance with its unit on narrow screens. */}
+            <MapPin className="size-4 shrink-0 text-forest" aria-hidden /> {"Market 1.1 km · Restaurant 700 m"}
+          </li>
+        </ul>
+        <Link
+          href="/properties?verified_only=true&state=Enugu&city=Enugu"
+          className="mt-4 flex h-11 w-full items-center justify-center rounded-xl bg-forest text-sm font-bold text-white hover:bg-deep"
+        >
+          View verification report
+        </Link>
+      </div>
     </div>
   );
 }
 
+// Hero background photo in public/. If the file is missing, the hero falls back to plain dark green.
+const HERO_PHOTO = "/hero.png";
+const hasHeroPhoto = existsSync(path.join(process.cwd(), "public", HERO_PHOTO));
+// Property photo shown inside the floating hero card (1024×455, cropped from hero-2.png to drop its baked-in badge and heart).
+const HERO_CARD_PHOTO = "/hero-2-cropped.png";
+
 export default async function HomePage() {
-  const properties = await featured();
-  // Showcase a real verified listing: prefer a family-size home with a photo.
-  const hero =
-    properties.find((p) => p.cover_photo_url && p.bedrooms >= 2 && p.agent?.is_verified) ??
-    properties.find((p) => p.cover_photo_url) ??
-    null;
+  const [properties, reference] = await Promise.all([featured(), getReference()]);
   return (
     <>
-      <section className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-brand-50 via-white to-emerald-50">
-        <div aria-hidden className="pointer-events-none absolute -right-32 -top-32 size-96 rounded-full bg-brand-100/60 blur-3xl" />
-        <div aria-hidden className="pointer-events-none absolute -bottom-40 left-1/3 size-96 rounded-full bg-emerald-100/50 blur-3xl" />
-        <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:py-24">
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-sm font-medium text-brand-800 shadow-sm ring-1 ring-brand-100">
-              <ShieldCheck className="size-4" aria-hidden /> Now in Lagos, Port Harcourt, Enugu, Awka & Owerri
-            </p>
-            <h1 className="mt-5 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
-              Verify the property and agent <span className="text-brand-600">before you pay rent.</span>
-            </h1>
-            <p className="mt-5 max-w-xl text-lg text-slate-600">
-              PropCheck reviewers check agent identity, authority to let, location, photos and the full fee breakdown —
-              and show you exactly what was and wasn&apos;t checked.
-            </p>
-
-            <form
-              action="/properties"
-              className="mt-8 grid gap-2 rounded-2xl bg-white p-2 shadow-lg shadow-brand-900/5 ring-1 ring-slate-200 sm:grid-cols-[1fr_1.3fr_auto]"
-            >
-              <label className="sr-only" htmlFor="hero-state">State</label>
-              <Select id="hero-state" name="state" defaultValue="Lagos">
-                <option value="Lagos">Lagos</option>
-                <option value="Rivers">Rivers (Port Harcourt)</option>
-                <option value="Enugu">Enugu</option>
-                <option value="Anambra">Anambra</option>
-                <option value="Imo">Imo</option>
-                <option value="">All states</option>
-              </Select>
-              <label className="sr-only" htmlFor="hero-q">Area or keyword</label>
-              <input
-                id="hero-q"
-                name="q"
-                placeholder="Area, e.g. Lekki, GRA Phase 2, Independence Layout"
-                className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base sm:text-sm"
+      <section className="px-4 pt-4 sm:px-6 lg:pt-6">
+        <div className="mx-auto max-w-7xl">
+          <div className="relative overflow-hidden rounded-[2rem] bg-brand-900">
+            {hasHeroPhoto && (
+              <Image
+                src={HERO_PHOTO}
+                alt="Bright open-plan living room with a grey sofa, opening onto a kitchen and balcony"
+                fill
+                preload
+                sizes="(min-width: 1280px) 1248px, 100vw"
+                className="object-cover"
               />
-              <button className={buttonClass("primary", "md")}>
-                <Search className="size-4" aria-hidden /> Search
-              </button>
-              <label className="col-span-full flex items-center gap-2 px-2 pb-1 text-sm text-slate-600">
-                <input type="checkbox" name="verified_only" value="true" defaultChecked className="accent-brand-600" />
-                Only show verified properties
-              </label>
-            </form>
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/agents?verified_only=true" className={buttonClass("secondary", "lg")}>
-                <BadgeCheck className="size-5" aria-hidden /> Find a verified agent
-              </Link>
-              <Link href="/find-an-agent" className={buttonClass("ghost", "lg")}>
-                Help me find a house <ArrowRight className="size-4" aria-hidden />
-              </Link>
+            )}
+            <div aria-hidden className="absolute inset-0 bg-brand-900/80 opacity-70 lg:bg-transparent lg:hero-scrim" />
+            <div className="relative grid gap-10 px-5 pb-28 pt-10 sm:px-10 sm:pt-14 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-center lg:gap-12 lg:px-14 lg:pb-32 lg:pt-16 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="flex max-w-xl flex-col items-start">
+                <p className="inline-flex items-center gap-2 rounded-full bg-forest/75 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur-sm sm:text-sm">
+                  <span className="size-2 shrink-0 rounded-full bg-highlight" aria-hidden />
+                  Serving Lagos, Enugu, Anambra, Imo and Rivers
+                </p>
+                <h1 className="mt-6 text-[2.125rem] font-extrabold leading-[1.04] tracking-tight min-[375px]:text-[2.5rem] sm:text-6xl lg:text-[4rem] xl:text-7xl">
+                  <span className="block text-white">Find a home</span>
+                  <span className="block text-highlight">you can trust.</span>
+                </h1>
+                <p className="mt-4 max-w-lg text-base leading-relaxed text-white/85 sm:text-lg">
+                  Connect with trusted agents, explore verified properties and discover what is nearby before you pay rent.
+                </p>
+                <div className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+                  <Link
+                    href="/properties"
+                    className="inline-flex h-12 items-center justify-center rounded-full bg-highlight px-7 font-bold text-forest transition-colors hover:bg-lime-200"
+                  >
+                    Browse properties
+                  </Link>
+                  <Link
+                    href="/agents?verified_only=true"
+                    className="inline-flex h-12 items-center justify-center rounded-full bg-forest/70 px-7 font-bold text-white ring-1 ring-white/50 backdrop-blur-sm transition-colors hover:bg-forest"
+                  >
+                    Find a verified agent
+                  </Link>
+                </div>
+              </div>
+              <div className="flex justify-start lg:justify-end">
+                <HeroPropertyCard />
+              </div>
             </div>
           </div>
-
-          {hero ? <HeroListing property={hero} /> : <FeatureGrid />}
+          <div className="relative z-10 -mt-20 sm:mx-4 lg:mx-8">
+            <HeroSearch reference={reference} />
+          </div>
         </div>
       </section>
 
-      {hero && (
-        <section className="border-b border-slate-200 bg-white">
-          <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-            <FeatureGrid />
-          </div>
-        </section>
-      )}
+      <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
+        <FeatureGrid />
+      </section>
 
       <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
         <div className="mb-6 flex items-end justify-between gap-4">

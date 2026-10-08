@@ -73,8 +73,8 @@ Transitions: `DRAFT→SUBMITTED→IN_REVIEW→(INSPECTION_BOOKED→)VERIFIED|REJ
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | `/properties/{id}/slots` | * | Public: upcoming open slots. Managers: all slots. |
-| POST | `/properties/{id}/slots` | manager | `{start_time, end_time}` in the future, ≤ 4 h. Overlaps → 409 (also enforced by a database exclusion constraint). |
+| GET | `/properties/{id}/inspection-slots` | * | Public: upcoming open slots. Managers: all slots. |
+| POST | `/properties/{id}/inspection-slots` | manager | `{start_time, end_time}` in the future, ≤ 4 h. Overlaps → 409 (also enforced by a database exclusion constraint). |
 | POST | `/inspection-slots/{id}/cancel` | manager | Only if no active booking |
 | POST | `/inspection-bookings` | R | `{slot_id, renter_note?}`. A slot holds one live booking (row lock + partial unique index). |
 | GET | `/inspection-bookings` | R, A, L, S | Scoped to your own bookings or properties |

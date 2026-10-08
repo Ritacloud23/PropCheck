@@ -135,7 +135,7 @@ def main() -> None:
     start = datetime.now(UTC) + timedelta(days=2)
     slot = check(
         agent.post(
-            f"/api/properties/{pid}/slots",
+            f"/api/properties/{pid}/inspection-slots",
             json={"start_time": start.isoformat(), "end_time": (start + timedelta(hours=1)).isoformat()},
         ),
         201,

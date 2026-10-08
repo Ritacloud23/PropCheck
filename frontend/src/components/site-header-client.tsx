@@ -20,14 +20,16 @@ export function useLogout() {
   };
 }
 
-export function UserMenu({ name, role }: { name: string; role: Role }) {
+export function UserMenu({ name, role, dashboardHref }: { name: string; role: Role; dashboardHref: string }) {
   const logout = useLogout();
   return (
     <div className="hidden items-center gap-2 sm:flex">
-      <Link href="/dashboard" className={buttonClass("secondary", "sm")}>
+      <Link href={dashboardHref} className={buttonClass("secondary", "sm")}>
         <LayoutDashboard className="size-4" aria-hidden />
-        <span className="max-w-32 truncate">{name.split(" ")[0]}</span>
-        <span className="text-xs font-normal text-slate-500">· {humanize(role)}</span>
+        Dashboard
+        <span className="max-w-32 truncate text-xs font-normal text-slate-500">
+          · {name.split(" ")[0]}, {humanize(role)}
+        </span>
       </Link>
       <button onClick={logout} className={buttonClass("ghost", "sm")} aria-label="Log out">
         <LogOut className="size-4" aria-hidden />
@@ -36,7 +38,7 @@ export function UserMenu({ name, role }: { name: string; role: Role }) {
   );
 }
 
-export function MobileMenu({ nav, signedIn }: { nav: { href: string; label: string }[]; signedIn: boolean }) {
+export function MobileMenu({ nav, dashboardHref }: { nav: { href: string; label: string }[]; dashboardHref: string | null }) {
   const [open, setOpen] = useState(false);
   const logout = useLogout();
 
@@ -64,9 +66,9 @@ export function MobileMenu({ nav, signedIn }: { nav: { href: string; label: stri
             ))}
           </nav>
           <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
-            {signedIn ? (
+            {dashboardHref ? (
               <>
-                <Link href="/dashboard" className={buttonClass("primary", "md")}>
+                <Link href={dashboardHref} className={buttonClass("primary", "md")}>
                   Dashboard
                 </Link>
                 <button onClick={logout} className={buttonClass("secondary", "md")}>

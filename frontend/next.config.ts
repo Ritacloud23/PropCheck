@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
       { source: "/media/:path*", destination: `${apiUrl}/media/:path*` },
     ];
   },
+  // Old dashboard paths, kept so bookmarks and earlier links still work.
+  async redirects() {
+    return [
+      { source: "/dashboard/renter/requests", destination: "/dashboard/renter/house-search", permanent: true },
+      { source: "/dashboard/agent/bookings", destination: "/dashboard/agent/inspection-slots", permanent: true },
+      { source: "/dashboard/reviewer/audit", destination: "/dashboard/reviewer/audit-log", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

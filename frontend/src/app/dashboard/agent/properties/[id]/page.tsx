@@ -22,7 +22,7 @@ export default async function ManagePropertyPage(props: PageProps<"/dashboard/ag
   if (!property || !property.can_manage) notFound();
   const [reference, slots, verificationCase] = await Promise.all([
     getReference(),
-    serverApi<Slot[]>(`/api/properties/${id}/slots`),
+    serverApi<Slot[]>(`/api/properties/${id}/inspection-slots`),
     property.latest_case_id ? serverApiOrNull<VerificationCase>(`/api/verification-cases/${property.latest_case_id}`) : null,
   ]);
   const docs = property.documents ?? [];

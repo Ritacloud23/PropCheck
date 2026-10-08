@@ -1,6 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
+import { dashboardHome } from "@/lib/guards";
 import { getCurrentUser } from "@/lib/server-api";
 
 import { MobileMenu, UserMenu } from "./site-header-client";
@@ -8,21 +9,22 @@ import { buttonClass } from "./ui";
 
 export const NAV = [
   { href: "/properties", label: "Properties" },
-  { href: "/agents", label: "Verified agents" },
-  { href: "/find-an-agent", label: "Find me a house" },
-  { href: "/nearby", label: "What's nearby" },
+  { href: "/agents", label: "Find an agent" },
+  { href: "/nearby", label: "Nearby places" },
   { href: "/how-it-works", label: "How it works" },
-  { href: "/pricing", label: "Pricing" },
+  // No contact page yet; the house-search request form is how renters reach the team.
+  { href: "/find-an-agent", label: "Get in touch" },
 ];
 
 export function Logo() {
   return (
-    <Link href="/" className="flex items-center gap-2 font-bold tracking-tight text-slate-900">
-      <span className="flex size-8 items-center justify-center rounded-lg bg-brand-600 text-white">
+    <Link href="/" className="flex items-center gap-2.5">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-forest text-highlight">
         <ShieldCheck className="size-5" aria-hidden />
       </span>
-      <span>
-        PropCheck<span className="text-brand-600"> Nigeria</span>
+      <span className="flex flex-col">
+        <span className="text-lg font-extrabold leading-none tracking-tight text-deep">PropCheck</span>
+        <span className="mt-1 text-xs font-medium leading-none text-muted">Nigeria&apos;s trusted home search</span>
       </span>
     </Link>
   );
@@ -43,7 +45,7 @@ export async function SiteHeader() {
         </nav>
         <div className="flex items-center gap-2">
           {user ? (
-            <UserMenu name={user.full_name} role={user.role} />
+            <UserMenu name={user.full_name} role={user.role} dashboardHref={dashboardHome(user.role)} />
           ) : (
             <div className="hidden items-center gap-2 sm:flex">
               <Link href="/login" className={buttonClass("ghost", "sm")}>
@@ -54,7 +56,7 @@ export async function SiteHeader() {
               </Link>
             </div>
           )}
-          <MobileMenu nav={NAV} signedIn={!!user} />
+          <MobileMenu nav={NAV} dashboardHref={user ? dashboardHome(user.role) : null} />
         </div>
       </div>
     </header>
