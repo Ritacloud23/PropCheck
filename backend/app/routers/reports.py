@@ -10,20 +10,20 @@ from app.models.enums import ReportReason, Role
 from app.routers.properties import load_property
 from app.schemas.workflow import ReportOut
 from app.services import audit, presenters, storage
-from app.services.ratelimit import auth_rate_limit
+from app.services.ratelimit import limit
 
 router = APIRouter(tags=["reports"])
 
 
-def report_out(session, report: AgentReport, viewer: User) -> ReportOut:
+async def report_out(session, report: AgentReport, viewer: User) -> ReportOut:
     is_staff = viewer.role in (Role.REVIEWER, Role.ADMIN)
-    names = presenters.user_names(session, [report.reporter_id])
+    names = await presenters.user_names(session, [report.reporter_id])
     agent_name = None
     if report.agent_id:
-        profile = session.get(AgentProfile, report.agent_id)
+        profile = await session.get(AgentProfile, report.agent_id)
         if profile:
-            agent_name = presenters.user_names(session, [profile.user_id]).get(profile.user_id)
-    prop = session.get(Property, report.property_id) if report.property_id else None
+            agent_name = (await presenters.user_names(session, [profile.user_id])).get(profile.user_id)
+    prop = await session.get(Property, report.property_id) if report.property_id else None
     return ReportOut(
         id=report.id,  # type: ignore[arg-type]
         reporter_id=report.reporter_id,
@@ -59,7 +59,7 @@ async def _create(
         raise BadRequest("Please describe what happened (at least 10 characters).")
     evidence_key = None
     if evidence is not None and evidence.filename:
-        evidence_key = storage.save_private(
+        evidence_key = await storage.save_private(
             await storage.read_validated(evidence, kind="document"), "report-evidence"
         )
     report = AgentReport(
@@ -71,15 +71,15 @@ async def _create(
         evidence_url=evidence_key,
     )
     session.add(report)
-    session.flush()
+    await session.flush()
     audit.record(
         session, actor_id=user.id, entity_type="AgentReport", entity_id=report.id,  # type: ignore[arg-type]
         action="REPORT_FILED", to_status=report.status.value,
         metadata={"reason": reason.value, "agent_id": agent_id, "property_id": property_id, "evidence": bool(evidence_key)},
     )  # fmt: skip
-    session.commit()
-    session.refresh(report)
-    return report_out(session, report, user)
+    await session.commit()
+    await session.refresh(report)
+    return await report_out(session, report, user)
 
 
 ReasonForm = Annotated[ReportReason, Form()]
@@ -91,7 +91,7 @@ EvidenceFile = Annotated[UploadFile | None, File(description="Optional screensho
     "/api/agents/{agent_id}/report",
     response_model=ReportOut,
     status_code=201,
-    dependencies=[Depends(auth_rate_limit)],
+    dependencies=[Depends(limit("reports", by="user"))],
 )
 async def report_agent(
     agent_id: int,
@@ -101,7 +101,7 @@ async def report_agent(
     description: DescriptionForm,
     evidence: EvidenceFile = None,
 ) -> ReportOut:
-    profile = session.get(AgentProfile, agent_id)
+    profile = await session.get(AgentProfile, agent_id)
     if not profile:
         raise NotFound("Agent not found.")
     if profile.user_id == user.id:
@@ -121,7 +121,7 @@ async def report_agent(
     "/api/properties/{property_id}/report",
     response_model=ReportOut,
     status_code=201,
-    dependencies=[Depends(auth_rate_limit)],
+    dependencies=[Depends(limit("reports", by="user"))],
 )
 async def report_property(
     property_id: int,
@@ -131,7 +131,7 @@ async def report_property(
     description: DescriptionForm,
     evidence: EvidenceFile = None,
 ) -> ReportOut:
-    prop = load_property(session, property_id)
+    prop = await load_property(session, property_id)
     return await _create(
         session,
         user,
@@ -144,8 +144,10 @@ async def report_property(
 
 
 @router.get("/api/reports/mine", response_model=list[ReportOut])
-def my_reports(user: CurrentUser, session: SessionDep) -> list[ReportOut]:
-    rows = session.exec(
-        select(AgentReport).where(AgentReport.reporter_id == user.id).order_by(col(AgentReport.id).desc())
+async def my_reports(user: CurrentUser, session: SessionDep) -> list[ReportOut]:
+    rows = (
+        await session.exec(
+            select(AgentReport).where(AgentReport.reporter_id == user.id).order_by(col(AgentReport.id).desc())
+        )
     ).all()
-    return [report_out(session, r, user) for r in rows]
+    return [await report_out(session, r, user) for r in rows]

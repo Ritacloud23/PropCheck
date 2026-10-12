@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/reference", tags=["reference"])
 
 
 @router.get("")
-def reference_data() -> dict:
+async def reference_data() -> dict:
     """Static lookups for forms and filters. Only states PropCheck currently serves are listed."""
     return {
         "states": active_states(),

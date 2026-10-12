@@ -45,17 +45,19 @@ RENTER = frozenset({Role.RENTER})
 # ---------------------------------------------------------------- shared helpers
 
 
-def property_manager_ids(session, prop: Property) -> set[int]:
+async def property_manager_ids(session, prop: Property) -> set[int]:
     """User ids allowed to manage a property: the owner and the listing agent's user."""
     ids = {prop.owner_user_id}
     if prop.listing_agent_id:
-        agent = session.get(AgentProfile, prop.listing_agent_id)
+        agent = await session.get(AgentProfile, prop.listing_agent_id)
         if agent:
             ids.add(agent.user_id)
     return ids
 
 
-def _set_property_availability(ctx: TransitionContext, prop: Property, status: AvailabilityStatus) -> None:
+async def _set_property_availability(
+    ctx: TransitionContext, prop: Property, status: AvailabilityStatus
+) -> None:
     if prop.availability_status == status:
         return
     old = prop.availability_status
@@ -76,29 +78,31 @@ def _set_property_availability(ctx: TransitionContext, prop: Property, status: A
 # ---------------------------------------------------------------- property verification cases
 
 
-def _case_property(ctx: TransitionContext) -> Property:
-    return ctx.session.get(Property, ctx.entity.property_id)  # type: ignore[return-value]
+async def _case_property(ctx: TransitionContext) -> Property:
+    return await ctx.session.get(Property, ctx.entity.property_id)  # type: ignore[return-value]
 
 
-def _guard_case_submitter(ctx: TransitionContext) -> None:
-    prop = _case_property(ctx)
-    if ctx.actor_id not in property_manager_ids(ctx.session, prop):
+async def _guard_case_submitter(ctx: TransitionContext) -> None:
+    prop = await _case_property(ctx)
+    if ctx.actor_id not in await property_manager_ids(ctx.session, prop):
         raise Forbidden("Only the property owner or listing agent can submit this case.")
 
 
-def _guard_case_no_conflict(ctx: TransitionContext) -> None:
+async def _guard_case_no_conflict(ctx: TransitionContext) -> None:
     """A reviewer must never decide a case they submitted or a property they own or list."""
-    prop = _case_property(ctx)
-    conflicted = {ctx.entity.submitted_by} | property_manager_ids(ctx.session, prop)
+    prop = await _case_property(ctx)
+    conflicted = {ctx.entity.submitted_by} | await property_manager_ids(ctx.session, prop)
     if ctx.actor_id in conflicted:
         raise Forbidden(
             "Conflict of interest: you cannot review a case you submitted or a property you manage."
         )
 
 
-def _guard_checks_complete(ctx: TransitionContext) -> None:
-    checks = ctx.session.exec(
-        select(VerificationCheck).where(VerificationCheck.verification_case_id == ctx.entity.id)
+async def _guard_checks_complete(ctx: TransitionContext) -> None:
+    checks = (
+        await ctx.session.exec(
+            select(VerificationCheck).where(VerificationCheck.verification_case_id == ctx.entity.id)
+        )
     ).all()
     by_type = {c.check_type: c.result for c in checks}
     problems = []
@@ -118,7 +122,7 @@ def _parse_dt(value) -> datetime | None:
     return datetime.fromisoformat(str(value))
 
 
-def _on_case_apply(ctx: TransitionContext) -> None:
+async def _on_case_apply(ctx: TransitionContext) -> None:
     case: VerificationCase = ctx.entity
     now = utcnow()
     to = ctx.to_status
@@ -147,7 +151,7 @@ def _on_case_apply(ctx: TransitionContext) -> None:
     if ctx.metadata.get("reviewer_notes"):
         case.reviewer_notes = str(ctx.metadata["reviewer_notes"])
 
-    prop = _case_property(ctx)
+    prop = await _case_property(ctx)
     prop.verification_status = PropertyVerificationState(to)
     prop.verification_expires_at = case.expires_at if to == VerificationStatus.VERIFIED else None
     ctx.session.add(prop)
@@ -180,24 +184,24 @@ VERIFICATION_CASE = StateMachine(
 # ---------------------------------------------------------------- agent verification
 
 
-def _application_profile(ctx: TransitionContext) -> AgentProfile:
-    return ctx.session.get(AgentProfile, ctx.entity.agent_profile_id)  # type: ignore[return-value]
+async def _application_profile(ctx: TransitionContext) -> AgentProfile:
+    return await ctx.session.get(AgentProfile, ctx.entity.agent_profile_id)  # type: ignore[return-value]
 
 
-def _guard_agent_owner(ctx: TransitionContext) -> None:
-    if _application_profile(ctx).user_id != ctx.actor_id:
+async def _guard_agent_owner(ctx: TransitionContext) -> None:
+    if (await _application_profile(ctx)).user_id != ctx.actor_id:
         raise Forbidden("You can only submit your own verification application.")
 
 
-def _guard_agent_no_conflict(ctx: TransitionContext) -> None:
-    profile = _application_profile(ctx)
+async def _guard_agent_no_conflict(ctx: TransitionContext) -> None:
+    profile = await _application_profile(ctx)
     if ctx.actor_id in (profile.user_id, ctx.entity.submitted_by):
         raise Forbidden("Conflict of interest: you cannot review your own agent application.")
 
 
-def _on_agent_apply(ctx: TransitionContext) -> None:
+async def _on_agent_apply(ctx: TransitionContext) -> None:
     app: AgentVerification = ctx.entity
-    profile = _application_profile(ctx)
+    profile = await _application_profile(ctx)
     now = utcnow()
     to = ctx.to_status
     if to == AgentVerificationStatus.SUBMITTED:
@@ -250,24 +254,24 @@ AGENT_VERIFICATION = StateMachine(
 # ---------------------------------------------------------------- inspection bookings
 
 
-def _booking_property(ctx: TransitionContext) -> Property:
-    return ctx.session.get(Property, ctx.entity.property_id)  # type: ignore[return-value]
+async def _booking_property(ctx: TransitionContext) -> Property:
+    return await ctx.session.get(Property, ctx.entity.property_id)  # type: ignore[return-value]
 
 
-def _guard_booking_manager(ctx: TransitionContext) -> None:
-    if ctx.actor_id not in property_manager_ids(ctx.session, _booking_property(ctx)):
+async def _guard_booking_manager(ctx: TransitionContext) -> None:
+    if ctx.actor_id not in await property_manager_ids(ctx.session, await _booking_property(ctx)):
         raise Forbidden("Only the property owner or listing agent can manage this booking.")
 
 
-def _guard_booking_cancel(ctx: TransitionContext) -> None:
+async def _guard_booking_cancel(ctx: TransitionContext) -> None:
     if ctx.actor and ctx.actor.role == Role.RENTER:
         if ctx.entity.renter_id != ctx.actor_id:
             raise Forbidden("You can only cancel your own bookings.")
         return
-    _guard_booking_manager(ctx)
+    await _guard_booking_manager(ctx)
 
 
-def _on_booking_apply(ctx: TransitionContext) -> None:
+async def _on_booking_apply(ctx: TransitionContext) -> None:
     booking: InspectionBooking = ctx.entity
     now = utcnow()
     to = ctx.to_status
@@ -280,7 +284,7 @@ def _on_booking_apply(ctx: TransitionContext) -> None:
             booking.landlord_note = ctx.reason or booking.landlord_note
         if to == BookingStatus.CANCELLED:
             booking.cancelled_at = now
-        slot = ctx.session.get(InspectionSlot, booking.slot_id)
+        slot = await ctx.session.get(InspectionSlot, booking.slot_id)
         if slot and slot.status == SlotStatus.BOOKED:
             slot.status = SlotStatus.OPEN
             ctx.session.add(slot)
@@ -311,33 +315,33 @@ INSPECTION_BOOKING = StateMachine(
 # ---------------------------------------------------------------- reservations (TEST/DEMO only)
 
 
-def _guard_reservation_renter(ctx: TransitionContext) -> None:
+async def _guard_reservation_renter(ctx: TransitionContext) -> None:
     if ctx.entity.renter_id != ctx.actor_id:
         raise Forbidden("Only the renter who made this reservation can do this.")
 
 
-def _guard_reservation_cancel(ctx: TransitionContext) -> None:
+async def _guard_reservation_cancel(ctx: TransitionContext) -> None:
     if ctx.actor and ctx.actor.role in STAFF:
         return
-    _guard_reservation_renter(ctx)
+    await _guard_reservation_renter(ctx)
 
 
-def _on_reservation_apply(ctx: TransitionContext) -> None:
+async def _on_reservation_apply(ctx: TransitionContext) -> None:
     res: Reservation = ctx.entity
     now = utcnow()
-    prop = ctx.session.get(Property, res.property_id)
+    prop = await ctx.session.get(Property, res.property_id)
     to = ctx.to_status
     if to == ReservationStatus.PENDING_RELEASE:
         res.paid_at = now
         res.payment_reference = ctx.metadata["payment_reference"]
         res.payment_provider = ctx.metadata.get("payment_provider")
-        _set_property_availability(ctx, prop, AvailabilityStatus.RESERVED)  # type: ignore[arg-type]
+        await _set_property_availability(ctx, prop, AvailabilityStatus.RESERVED)  # type: ignore[arg-type]
     elif to == ReservationStatus.RELEASED:
         res.released_at = now
-        _set_property_availability(ctx, prop, AvailabilityStatus.LET)  # type: ignore[arg-type]
+        await _set_property_availability(ctx, prop, AvailabilityStatus.LET)  # type: ignore[arg-type]
     elif to == ReservationStatus.REFUNDED:
         res.refunded_at = now
-        _set_property_availability(ctx, prop, AvailabilityStatus.AVAILABLE)  # type: ignore[arg-type]
+        await _set_property_availability(ctx, prop, AvailabilityStatus.AVAILABLE)  # type: ignore[arg-type]
     elif to == ReservationStatus.CANCELLED:
         res.cancellation_reason = ctx.reason
 
@@ -364,29 +368,29 @@ RESERVATION = StateMachine(
 # ---------------------------------------------------------------- house-search requests
 
 
-def _guard_request_owner_or_staff(ctx: TransitionContext) -> None:
+async def _guard_request_owner_or_staff(ctx: TransitionContext) -> None:
     if ctx.actor and ctx.actor.role in STAFF:
         return
     if ctx.entity.renter_id != ctx.actor_id:
         raise Forbidden("You can only change your own house-search request.")
 
 
-def _guard_assigned_agent_or_staff(ctx: TransitionContext) -> None:
+async def _guard_assigned_agent_or_staff(ctx: TransitionContext) -> None:
     if ctx.actor and ctx.actor.role in STAFF:
         return
-    agent = ctx.session.exec(select(AgentProfile).where(AgentProfile.user_id == ctx.actor_id)).first()
+    agent = (await ctx.session.exec(select(AgentProfile).where(AgentProfile.user_id == ctx.actor_id))).first()
     if agent is None or agent.id != ctx.entity.assigned_agent_id:
         raise Forbidden("Only the assigned agent can update this request.")
 
 
-def _guard_complete(ctx: TransitionContext) -> None:
+async def _guard_complete(ctx: TransitionContext) -> None:
     if ctx.actor and ctx.actor.role == Role.RENTER:
-        _guard_request_owner_or_staff(ctx)
+        await _guard_request_owner_or_staff(ctx)
     else:
-        _guard_assigned_agent_or_staff(ctx)
+        await _guard_assigned_agent_or_staff(ctx)
 
 
-def _on_request_apply(ctx: TransitionContext) -> None:
+async def _on_request_apply(ctx: TransitionContext) -> None:
     req: HouseSearchRequest = ctx.entity
     if ctx.to_status == HouseSearchStatus.ASSIGNED:
         req.assigned_agent_id = int(ctx.metadata["agent_id"])
@@ -423,7 +427,7 @@ HOUSE_SEARCH = StateMachine(
 # ---------------------------------------------------------------- reports
 
 
-def _on_report_apply(ctx: TransitionContext) -> None:
+async def _on_report_apply(ctx: TransitionContext) -> None:
     report: AgentReport = ctx.entity
     if ctx.to_status in (ReportStatus.RESOLVED, ReportStatus.REJECTED):
         report.resolved_at = utcnow()
@@ -449,7 +453,7 @@ AGENT_REPORT = StateMachine(
 # ---------------------------------------------------------------- nearby-place reports
 
 
-def _on_place_report_apply(ctx: TransitionContext) -> None:
+async def _on_place_report_apply(ctx: TransitionContext) -> None:
     report: PlaceReport = ctx.entity
     report.resolved_at = utcnow()
     if ctx.metadata.get("reviewer_notes"):

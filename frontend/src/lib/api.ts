@@ -35,7 +35,12 @@ export const post = <T>(path: string, body: Body = {}) => api<T>(path, { method:
 export const patch = <T>(path: string, body: Body) => api<T>(path, { method: "PATCH", body });
 
 export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
+  if (err instanceof ApiError) {
+    // Validation errors name the field, so the person knows which input to fix.
+    const first = err.fieldErrors?.[0];
+    if (first?.field) return `${first.field.replaceAll("_", " ").replace(/^\w/, (c) => c.toUpperCase())}: ${first.message}`;
+    return err.message;
+  }
   if (err instanceof Error) return err.message;
   return "Something went wrong. Please try again.";
 }

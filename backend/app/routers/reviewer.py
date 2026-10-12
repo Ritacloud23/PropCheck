@@ -52,18 +52,18 @@ ACTION_TARGET = {
 
 
 @router.get("/summary")
-def summary(user: StaffUser, session: SessionDep) -> dict:
-    def count(model, *where) -> int:
-        return int(session.exec(select(func.count()).select_from(model).where(*where)).one())
+async def summary(user: StaffUser, session: SessionDep) -> dict:
+    async def count(model, *where) -> int:
+        return int((await session.exec(select(func.count()).select_from(model).where(*where))).one())
 
     return {
-        "agent_applications_waiting": count(
+        "agent_applications_waiting": await count(
             AgentProfile,
             col(AgentProfile.verification_status).in_(
                 [AgentVerificationStatus.SUBMITTED, AgentVerificationStatus.IN_REVIEW]
             ),
         ),
-        "property_cases_waiting": count(
+        "property_cases_waiting": await count(
             VerificationCase,
             col(VerificationCase.status).in_(
                 [
@@ -73,15 +73,15 @@ def summary(user: StaffUser, session: SessionDep) -> dict:
                 ]
             ),
         ),
-        "house_search_unassigned": count(
+        "house_search_unassigned": await count(
             HouseSearchRequest,
             col(HouseSearchRequest.status).in_([HouseSearchStatus.SUBMITTED, HouseSearchStatus.MATCHING]),
         ),
-        "open_place_reports": count(PlaceReport, PlaceReport.status == PlaceReportStatus.OPEN),
-        "open_reports": count(
+        "open_place_reports": await count(PlaceReport, PlaceReport.status == PlaceReportStatus.OPEN),
+        "open_reports": await count(
             AgentReport, col(AgentReport.status).in_([ReportStatus.OPEN, ReportStatus.IN_REVIEW])
         ),
-        "refund_requests": count(
+        "refund_requests": await count(
             Reservation,
             Reservation.status == ReservationStatus.PENDING_RELEASE,
             col(Reservation.refund_requested_at).is_not(None),
@@ -92,11 +92,11 @@ def summary(user: StaffUser, session: SessionDep) -> dict:
 # ---------------------------------------------------------------- agent applications
 
 
-def _reviewer_agent(session, profile: AgentProfile, viewer: User) -> ReviewerAgentOut:
-    user = session.get(User, profile.user_id)
-    private = presenters.agent_private(session, profile, user)
-    latest = presenters.latest_application(session, profile.id)
-    open_reports = presenters.agent_stats(session, [profile.id]).get(profile.id, (0, 0))[1]
+async def _reviewer_agent(session, profile: AgentProfile, viewer: User) -> ReviewerAgentOut:
+    user = await session.get(User, profile.user_id)
+    private = await presenters.agent_private(session, profile, user)
+    latest = await presenters.latest_application(session, profile.id)
+    open_reports = (await presenters.agent_stats(session, [profile.id])).get(profile.id, (0, 0))[1]
     actions: list[str] = []
     if latest and viewer.id not in (profile.user_id, latest.submitted_by):
         targets = set(presenters.allowed_actions(AGENT_VERIFICATION, latest.status, viewer))
@@ -113,7 +113,7 @@ def _reviewer_agent(session, profile: AgentProfile, viewer: User) -> ReviewerAge
 
 
 @router.get("/agents", response_model=list[ReviewerAgentOut])
-def list_agent_applications(
+async def list_agent_applications(
     user: StaffUser,
     session: SessionDep,
     status: AgentVerificationStatus | None = Query(
@@ -130,26 +130,26 @@ def list_agent_applications(
                 [AgentVerificationStatus.SUBMITTED, AgentVerificationStatus.IN_REVIEW]
             )
         )
-    rows = session.exec(query.order_by(col(AgentProfile.updated_at).asc()).limit(limit)).all()
-    return [_reviewer_agent(session, p, user) for p in rows]
+    rows = (await session.exec(query.order_by(col(AgentProfile.updated_at).asc()).limit(limit))).all()
+    return [await _reviewer_agent(session, p, user) for p in rows]
 
 
 @router.get("/agents/{agent_id}", response_model=ReviewerAgentOut)
-def get_agent_application(agent_id: int, user: StaffUser, session: SessionDep) -> ReviewerAgentOut:
-    profile = session.get(AgentProfile, agent_id)
+async def get_agent_application(agent_id: int, user: StaffUser, session: SessionDep) -> ReviewerAgentOut:
+    profile = await session.get(AgentProfile, agent_id)
     if not profile:
         raise NotFound("Agent not found.")
-    return _reviewer_agent(session, profile, user)
+    return await _reviewer_agent(session, profile, user)
 
 
 @router.post("/agents/{agent_id}/{action}", response_model=ReviewerAgentOut)
-def decide_agent(
+async def decide_agent(
     agent_id: int, action: AgentAction, body: AgentDecisionIn, user: StaffUser, session: SessionDep
 ) -> ReviewerAgentOut:
-    profile = session.get(AgentProfile, agent_id)
+    profile = await session.get(AgentProfile, agent_id)
     if not profile:
         raise NotFound("Agent not found.")
-    latest = presenters.latest_application(session, profile.id)  # type: ignore[arg-type]
+    latest = await presenters.latest_application(session, profile.id)  # type: ignore[arg-type]
     if latest is None:
         raise Conflict("This agent has not submitted a verification application.")
     if action == "reinstate" and latest.status != AgentVerificationStatus.SUSPENDED:
@@ -159,24 +159,24 @@ def decide_agent(
         meta["reviewer_notes"] = body.reviewer_notes
     if body.expires_at:
         meta["expires_at"] = body.expires_at.isoformat()
-    transition(
+    await transition(
         session, AGENT_VERIFICATION, latest.id, ACTION_TARGET[action], user, reason=body.reason, metadata=meta
     )  # type: ignore[arg-type]
-    session.commit()
-    session.refresh(profile)
-    notify(
+    await session.commit()
+    await session.refresh(profile)
+    await notify(
         profile.user_id,
         f"AGENT_{action.upper().replace('-', '_')}",
         f"Agent verification is now {profile.verification_status.value}",
     )
-    return _reviewer_agent(session, profile, user)
+    return await _reviewer_agent(session, profile, user)
 
 
 # ---------------------------------------------------------------- reports
 
 
 @router.get("/reports", response_model=list[ReportOut])
-def list_reports(
+async def list_reports(
     user: StaffUser,
     session: SessionDep,
     status: ReportStatus | None = None,
@@ -185,28 +185,28 @@ def list_reports(
     query = select(AgentReport)
     if status:
         query = query.where(AgentReport.status == status)
-    rows = session.exec(query.order_by(col(AgentReport.id).desc()).limit(limit)).all()
-    return [report_out(session, r, user) for r in rows]
+    rows = (await session.exec(query.order_by(col(AgentReport.id).desc()).limit(limit))).all()
+    return [await report_out(session, r, user) for r in rows]
 
 
 @router.get("/reports/{report_id}", response_model=ReportOut)
-def get_report(report_id: int, user: StaffUser, session: SessionDep) -> ReportOut:
-    report = session.get(AgentReport, report_id)
+async def get_report(report_id: int, user: StaffUser, session: SessionDep) -> ReportOut:
+    report = await session.get(AgentReport, report_id)
     if not report:
         raise NotFound("Report not found.")
-    return report_out(session, report, user)
+    return await report_out(session, report, user)
 
 
 @router.post("/reports/{report_id}/start-review", response_model=ReportOut)
-def start_report_review(report_id: int, user: StaffUser, session: SessionDep) -> ReportOut:
-    report = transition(session, AGENT_REPORT, report_id, ReportStatus.IN_REVIEW, user)
-    session.commit()
-    session.refresh(report)
-    return report_out(session, report, user)
+async def start_report_review(report_id: int, user: StaffUser, session: SessionDep) -> ReportOut:
+    report = await transition(session, AGENT_REPORT, report_id, ReportStatus.IN_REVIEW, user)
+    await session.commit()
+    await session.refresh(report)
+    return await report_out(session, report, user)
 
 
 @router.post("/reports/{report_id}/{decision}", response_model=ReportOut)
-def decide_report(
+async def decide_report(
     report_id: int,
     decision: Literal["resolve", "reject"],
     body: ReportDecisionIn,
@@ -216,28 +216,32 @@ def decide_report(
     """Resolve or reject a report (reason required). Resolving may also suspend the agent, atomically."""
     target = ReportStatus.RESOLVED if decision == "resolve" else ReportStatus.REJECTED
     meta = {"reviewer_notes": body.reviewer_notes} if body.reviewer_notes else {}
-    report = transition(session, AGENT_REPORT, report_id, target, user, reason=body.reason, metadata=meta)
+    report = await transition(
+        session, AGENT_REPORT, report_id, target, user, reason=body.reason, metadata=meta
+    )
     if body.suspend_agent:
         if decision != "resolve" or not report.agent_id:
             raise Conflict("Only a resolved report about an agent can suspend that agent.")
-        latest = presenters.latest_application(session, report.agent_id)
+        latest = await presenters.latest_application(session, report.agent_id)
         if latest is None:
             raise Conflict("This agent has no verification to suspend.")
-        transition(
+        await transition(
             session, AGENT_VERIFICATION, latest.id, AgentVerificationStatus.SUSPENDED, user,  # type: ignore[arg-type]
             reason=f"Report #{report.id}: {body.reason}", metadata={"report_id": report.id},
         )  # fmt: skip
-    session.commit()
-    session.refresh(report)
-    notify(report.reporter_id, "REPORT_DECIDED", f"Your report {report.id} is now {report.status.value}")
-    return report_out(session, report, user)
+    await session.commit()
+    await session.refresh(report)
+    await notify(
+        report.reporter_id, "REPORT_DECIDED", f"Your report {report.id} is now {report.status.value}"
+    )
+    return await report_out(session, report, user)
 
 
 # ---------------------------------------------------------------- audit log
 
 
 @router.get("/audit-log", response_model=list[AuditOut])
-def audit_log(
+async def audit_log(
     user: StaffUser,
     session: SessionDep,
     entity_type: str | None = None,
@@ -252,8 +256,8 @@ def audit_log(
         query = query.where(AuditLog.entity_id == entity_id)
     if action:
         query = query.where(AuditLog.action == action)
-    rows = session.exec(query.order_by(col(AuditLog.id).desc()).limit(limit)).all()
-    names = presenters.user_names(session, [r.actor_user_id for r in rows])
+    rows = (await session.exec(query.order_by(col(AuditLog.id).desc()).limit(limit))).all()
+    names = await presenters.user_names(session, [r.actor_user_id for r in rows])
     out = []
     for r in rows:
         item = AuditOut.model_validate(r)

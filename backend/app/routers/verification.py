@@ -37,48 +37,52 @@ ACTIVE_CASE_STATUSES = (
 REVIEWABLE = (VerificationStatus.IN_REVIEW, VerificationStatus.INSPECTION_BOOKED)
 
 
-def _case_or_404(session, case_id: int) -> VerificationCase:
-    case = session.get(VerificationCase, case_id)
+async def _case_or_404(session, case_id: int) -> VerificationCase:
+    case = await session.get(VerificationCase, case_id)
     if not case:
         raise NotFound("Verification case not found.")
     return case
 
 
-def _require_case_access(session, case: VerificationCase, user: User) -> Property:
-    prop = session.get(Property, case.property_id)
+async def _require_case_access(session, case: VerificationCase, user: User) -> Property:
+    prop = await session.get(Property, case.property_id)
     if user.role in (Role.REVIEWER, Role.ADMIN):
         return prop  # type: ignore[return-value]
-    if user.id not in property_manager_ids(session, prop):  # type: ignore[arg-type]
+    if user.id not in await property_manager_ids(session, prop):  # type: ignore[arg-type]
         # 404 rather than 403 so private case ids are not confirmed to outsiders.
         raise NotFound("Verification case not found.")
     return prop  # type: ignore[return-value]
 
 
-def _assert_reviewer_independent(session, case: VerificationCase, prop: Property, user: User) -> None:
-    if user.id in ({case.submitted_by} | property_manager_ids(session, prop)):
+async def _assert_reviewer_independent(session, case: VerificationCase, prop: Property, user: User) -> None:
+    if user.id in ({case.submitted_by} | await property_manager_ids(session, prop)):
         raise Forbidden(
             "Conflict of interest: you cannot review a case you submitted or a property you manage."
         )
 
 
-def case_out(session, case: VerificationCase, viewer: User) -> CaseOut:
-    prop = session.get(Property, case.property_id)
-    checks = session.exec(
-        select(VerificationCheck)
-        .where(VerificationCheck.verification_case_id == case.id)
-        .order_by(col(VerificationCheck.id))
+async def case_out(session, case: VerificationCase, viewer: User) -> CaseOut:
+    prop = await session.get(Property, case.property_id)
+    checks = (
+        await session.exec(
+            select(VerificationCheck)
+            .where(VerificationCheck.verification_case_id == case.id)
+            .order_by(col(VerificationCheck.id))
+        )
     ).all()
-    docs = session.exec(
-        select(PropertyDocument)
-        .where(PropertyDocument.property_id == prop.id)
-        .order_by(col(PropertyDocument.id))
+    docs = (
+        await session.exec(
+            select(PropertyDocument)
+            .where(PropertyDocument.property_id == prop.id)
+            .order_by(col(PropertyDocument.id))
+        )
     ).all()
-    names = presenters.user_names(session, [case.submitted_by])
+    names = await presenters.user_names(session, [case.submitted_by])
     listing_agent: AgentPublicOut | None = None
     if prop.listing_agent_id:
-        profile = session.get(AgentProfile, prop.listing_agent_id)
+        profile = await session.get(AgentProfile, prop.listing_agent_id)
         if profile:
-            listing_agent = presenters.agent_public(profile, session.get(User, profile.user_id))
+            listing_agent = presenters.agent_public(profile, await session.get(User, profile.user_id))
     check_out = []
     for c in checks:
         item = CheckOut.model_validate(c)
@@ -117,14 +121,17 @@ def case_out(session, case: VerificationCase, viewer: User) -> CaseOut:
 
 
 @router.post("/api/properties/{property_id}/verification", response_model=CaseOut, status_code=201)
-def open_case(property_id: int, user: ListerUser, session: SessionDep) -> CaseOut:
+async def open_case(property_id: int, user: ListerUser, session: SessionDep) -> CaseOut:
     """Open a new DRAFT verification case (with the 8 checklist items) for your property."""
-    prop = load_property(session, property_id)
-    require_manager(session, prop, user)
-    session.exec(select(Property).where(Property.id == prop.id).with_for_update()).one()
-    existing = session.exec(
-        select(VerificationCase).where(
-            VerificationCase.property_id == prop.id, col(VerificationCase.status).in_(ACTIVE_CASE_STATUSES)
+    prop = await load_property(session, property_id)
+    await require_manager(session, prop, user)
+    (await session.exec(select(Property).where(Property.id == prop.id).with_for_update())).one()
+    existing = (
+        await session.exec(
+            select(VerificationCase).where(
+                VerificationCase.property_id == prop.id,
+                col(VerificationCase.status).in_(ACTIVE_CASE_STATUSES),
+            )
         )
     ).first()
     if existing:
@@ -138,7 +145,7 @@ def open_case(property_id: int, user: ListerUser, session: SessionDep) -> CaseOu
         verification_reference=f"TMP-{secrets.token_hex(8)}",
     )
     session.add(case)
-    session.flush()
+    await session.flush()
     case.verification_reference = f"PCV-{utcnow().year}-{case.id:05d}"
     for ct in CheckType:
         session.add(VerificationCheck(verification_case_id=case.id, check_type=ct))  # type: ignore[arg-type]
@@ -149,13 +156,13 @@ def open_case(property_id: int, user: ListerUser, session: SessionDep) -> CaseOu
         session, actor_id=user.id, entity_type="VerificationCase", entity_id=case.id,  # type: ignore[arg-type]
         action="CASE_OPENED", to_status="DRAFT", metadata={"property_id": prop.id},
     )  # fmt: skip
-    session.commit()
-    session.refresh(case)
-    return case_out(session, case, user)
+    await session.commit()
+    await session.refresh(case)
+    return await case_out(session, case, user)
 
 
 @router.get("/api/verification-cases", response_model=list[CaseOut])
-def list_cases(
+async def list_cases(
     user: CurrentUser,
     session: SessionDep,
     status: VerificationStatus | None = None,
@@ -170,7 +177,7 @@ def list_cases(
             query = query.where(col(VerificationCase.assigned_reviewer_id).is_(None))
         query = query.where(VerificationCase.status != VerificationStatus.DRAFT)
     elif user.role in (Role.AGENT, Role.LANDLORD):
-        agent = session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id)).first()
+        agent = (await session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id))).first()
         own = select(Property.id).where(
             (Property.owner_user_id == user.id) | (Property.listing_agent_id == (agent.id if agent else -1))
         )
@@ -179,36 +186,38 @@ def list_cases(
         raise Forbidden("Renters do not have verification cases.")
     if status:
         query = query.where(VerificationCase.status == status)
-    cases = session.exec(query.order_by(col(VerificationCase.id).desc()).limit(limit)).all()
-    return [case_out(session, c, user) for c in cases]
+    cases = (await session.exec(query.order_by(col(VerificationCase.id).desc()).limit(limit))).all()
+    return [await case_out(session, c, user) for c in cases]
 
 
 @router.get("/api/verification-cases/{case_id}", response_model=CaseOut)
-def get_case(case_id: int, user: CurrentUser, session: SessionDep) -> CaseOut:
-    case = _case_or_404(session, case_id)
-    _require_case_access(session, case, user)
-    return case_out(session, case, user)
+async def get_case(case_id: int, user: CurrentUser, session: SessionDep) -> CaseOut:
+    case = await _case_or_404(session, case_id)
+    await _require_case_access(session, case, user)
+    return await case_out(session, case, user)
 
 
 @router.post("/api/verification-cases/{case_id}/submit", response_model=CaseOut)
-def submit_case(case_id: int, user: ListerUser, session: SessionDep) -> CaseOut:
-    case = _case_or_404(session, case_id)
-    prop = _require_case_access(session, case, user)
-    photos = session.exec(select(func.count()).where(PropertyMedia.property_id == prop.id)).one()
-    docs = session.exec(select(func.count()).where(PropertyDocument.property_id == prop.id)).one()
+async def submit_case(case_id: int, user: ListerUser, session: SessionDep) -> CaseOut:
+    case = await _case_or_404(session, case_id)
+    prop = await _require_case_access(session, case, user)
+    photos = (await session.exec(select(func.count()).where(PropertyMedia.property_id == prop.id))).one()
+    docs = (await session.exec(select(func.count()).where(PropertyDocument.property_id == prop.id))).one()
     if photos < 1 or docs < 1:
         raise BadRequest("Upload at least one photo and one supporting document before submitting.")
-    transition(session, VERIFICATION_CASE, case.id, VerificationStatus.SUBMITTED, user)  # type: ignore[arg-type]
-    session.commit()
-    session.refresh(case)
-    return case_out(session, case, user)
+    await transition(session, VERIFICATION_CASE, case.id, VerificationStatus.SUBMITTED, user)  # type: ignore[arg-type]
+    await session.commit()
+    await session.refresh(case)
+    return await case_out(session, case, user)
 
 
 @router.post("/api/verification-cases/{case_id}/transition", response_model=CaseOut)
-def transition_case(case_id: int, body: CaseTransitionIn, user: CurrentUser, session: SessionDep) -> CaseOut:
+async def transition_case(
+    case_id: int, body: CaseTransitionIn, user: CurrentUser, session: SessionDep
+) -> CaseOut:
     """Move a case through the workflow. Allowed moves, roles and conflict rules are enforced centrally."""
-    case = _case_or_404(session, case_id)
-    _require_case_access(session, case, user)
+    case = await _case_or_404(session, case_id)
+    await _require_case_access(session, case, user)
     meta = {
         k: (v.isoformat() if hasattr(v, "isoformat") else v)
         for k, v in body.model_dump(
@@ -216,35 +225,40 @@ def transition_case(case_id: int, body: CaseTransitionIn, user: CurrentUser, ses
         ).items()
         if v is not None
     }
-    transition(session, VERIFICATION_CASE, case.id, body.to_status, user, reason=body.reason, metadata=meta)  # type: ignore[arg-type]
-    session.commit()
-    session.refresh(case)
-    return case_out(session, case, user)
+    await transition(
+        session, VERIFICATION_CASE, case.id, body.to_status, user, reason=body.reason, metadata=meta,  # type: ignore[arg-type]
+    )  # fmt: skip
+    await session.commit()
+    await session.refresh(case)
+    return await case_out(session, case, user)
 
 
 @router.post("/api/verification-cases/{case_id}/checks", response_model=CaseOut)
-def record_check(case_id: int, body: CheckIn, user: StaffUser, session: SessionDep) -> CaseOut:
-    case = session.exec(
-        select(VerificationCase).where(VerificationCase.id == case_id).with_for_update()
+async def record_check(case_id: int, body: CheckIn, user: StaffUser, session: SessionDep) -> CaseOut:
+    case = (
+        await session.exec(select(VerificationCase).where(VerificationCase.id == case_id).with_for_update())
     ).first()
     if not case:
         raise NotFound("Verification case not found.")
-    prop = session.get(Property, case.property_id)
-    _assert_reviewer_independent(session, case, prop, user)  # type: ignore[arg-type]
+    prop = await session.get(Property, case.property_id)
+    await _assert_reviewer_independent(session, case, prop, user)  # type: ignore[arg-type]
     if case.status not in REVIEWABLE:
         raise Conflict(
             f"Checklist can only be updated while the case is in review (currently {case.status.value})."
         )
-    check = session.exec(
-        select(VerificationCheck).where(
-            VerificationCheck.verification_case_id == case.id, VerificationCheck.check_type == body.check_type
+    check = (
+        await session.exec(
+            select(VerificationCheck).where(
+                VerificationCheck.verification_case_id == case.id,
+                VerificationCheck.check_type == body.check_type,
+            )
         )
     ).first()
     if check is None:
         check = VerificationCheck(verification_case_id=case.id, check_type=body.check_type)  # type: ignore[arg-type]
     doc_key = None
     if body.document_id is not None:
-        doc = session.get(PropertyDocument, body.document_id)
+        doc = await session.get(PropertyDocument, body.document_id)
         if not doc or doc.property_id != prop.id:  # type: ignore[union-attr]
             raise BadRequest("That document does not belong to this property.")
         doc_key = f"property_document:{doc.id}"
@@ -263,22 +277,22 @@ def record_check(case_id: int, body: CheckIn, user: StaffUser, session: SessionD
         action="CHECK_RECORDED", from_status=previous, to_status=body.result.value,
         metadata={"check_type": body.check_type.value},
     )  # fmt: skip
-    session.commit()
-    session.refresh(case)
-    return case_out(session, case, user)
+    await session.commit()
+    await session.refresh(case)
+    return await case_out(session, case, user)
 
 
 @router.post("/api/verification-cases/{case_id}/documents/{document_id}/review", response_model=CaseOut)
-def review_document(
+async def review_document(
     case_id: int, document_id: int, body: DocumentReviewIn, user: StaffUser, session: SessionDep
 ) -> CaseOut:
     """Mark a document as REVIEWED / ACCEPTED / REJECTED. Uploading alone never makes a document trusted."""
-    case = _case_or_404(session, case_id)
-    prop = session.get(Property, case.property_id)
-    _assert_reviewer_independent(session, case, prop, user)  # type: ignore[arg-type]
+    case = await _case_or_404(session, case_id)
+    prop = await session.get(Property, case.property_id)
+    await _assert_reviewer_independent(session, case, prop, user)  # type: ignore[arg-type]
     if case.status not in REVIEWABLE:
         raise Conflict("Documents can only be reviewed while the case is in review.")
-    doc = session.get(PropertyDocument, document_id)
+    doc = await session.get(PropertyDocument, document_id)
     if not doc or doc.property_id != prop.id:  # type: ignore[union-attr]
         raise NotFound("Document not found on this property.")
     previous = doc.review_status.value
@@ -291,20 +305,22 @@ def review_document(
         action="DOCUMENT_REVIEWED", from_status=previous, to_status=body.review_status.value,
         metadata={"document_id": doc.id, "document_type": doc.document_type.value},
     )  # fmt: skip
-    session.commit()
-    return case_out(session, case, user)
+    await session.commit()
+    return await case_out(session, case, user)
 
 
 @router.get("/api/verification-cases/{case_id}/audit-log", response_model=list[AuditOut])
-def case_audit_log(case_id: int, user: CurrentUser, session: SessionDep) -> list[AuditOut]:
-    case = _case_or_404(session, case_id)
-    _require_case_access(session, case, user)
-    rows = session.exec(
-        select(AuditLog)
-        .where(AuditLog.entity_type == "VerificationCase", AuditLog.entity_id == case.id)
-        .order_by(col(AuditLog.id))
+async def case_audit_log(case_id: int, user: CurrentUser, session: SessionDep) -> list[AuditOut]:
+    case = await _case_or_404(session, case_id)
+    await _require_case_access(session, case, user)
+    rows = (
+        await session.exec(
+            select(AuditLog)
+            .where(AuditLog.entity_type == "VerificationCase", AuditLog.entity_id == case.id)
+            .order_by(col(AuditLog.id))
+        )
     ).all()
-    names = presenters.user_names(session, [r.actor_user_id for r in rows])
+    names = await presenters.user_names(session, [r.actor_user_id for r in rows])
     out = []
     for r in rows:
         item = AuditOut.model_validate(r)

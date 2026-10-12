@@ -14,12 +14,13 @@ The engine never commits. The calling service commits once at the end, so a fail
 any point (including after an earlier transition in the same request) rolls back everything.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.errors import BadRequest, Forbidden, InvalidTransition, NotFound
 from app.models import User
@@ -29,7 +30,7 @@ from app.services import audit
 
 @dataclass
 class TransitionContext:
-    session: Session
+    session: AsyncSession
     entity: Any
     actor: User | None  # None means the system itself (e.g. scheduled expiry)
     from_status: str
@@ -42,8 +43,9 @@ class TransitionContext:
         return self.actor.id if self.actor else None
 
 
-Guard = Callable[[TransitionContext], None]
-Hook = Callable[[TransitionContext], None]
+# Guards and hooks are coroutines because most of them load related rows.
+Guard = Callable[[TransitionContext], Awaitable[None]]
+Hook = Callable[[TransitionContext], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -73,8 +75,8 @@ def _value(status: Any) -> str:
     return status.value if isinstance(status, Enum) else str(status)
 
 
-def transition(
-    session: Session,
+async def transition(
+    session: AsyncSession,
     machine: StateMachine,
     entity_id: int,
     to_status: str | Enum,
@@ -84,11 +86,13 @@ def transition(
     metadata: dict[str, Any] | None = None,
 ) -> Any:
     model = machine.model
-    entity = session.exec(
-        select(model)
-        .where(model.id == entity_id)  # type: ignore[attr-defined]
-        .with_for_update()
-        .execution_options(populate_existing=True)
+    entity = (
+        await session.exec(
+            select(model)
+            .where(model.id == entity_id)  # type: ignore[attr-defined]
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     ).first()
     if entity is None:
         raise NotFound(f"{machine.entity_type} not found.")
@@ -119,11 +123,11 @@ def transition(
     )
     if actor is not None:
         for guard in rule.guards:
-            guard(ctx)
+            await guard(ctx)
 
     setattr(entity, machine.status_attr, getattr(entity, machine.status_attr).__class__(target))
     if machine.on_apply:
-        machine.on_apply(ctx)
+        await machine.on_apply(ctx)
     session.add(entity)
 
     audit.record(
@@ -137,5 +141,5 @@ def transition(
         reason=reason,
         metadata=ctx.metadata,
     )
-    session.flush()
+    await session.flush()
     return entity

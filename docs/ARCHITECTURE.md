@@ -50,14 +50,14 @@ flowchart LR
 | Forms | React Hook Form + Zod | Zod schemas mirror backend Pydantic validation |
 | Maps | Leaflet + react-leaflet + OpenStreetMap | Client-only component (dynamic import) |
 | Backend | FastAPI, Python 3.12 (Docker) / 3.11+ | OpenAPI docs at `/docs` |
-| ORM / migrations | SQLModel (SQLAlchemy 2) + Alembic, psycopg 3 | |
+| ORM / migrations | SQLModel (SQLAlchemy 2, AsyncSession) + Alembic, asyncpg (fully async request path) | |
 | Database | PostgreSQL 16 | `btree_gist` extension for slot-overlap exclusion |
 | Auth | JWT in httpOnly, SameSite=Lax cookie; Bearer accepted for tests/docs | Passwords hashed with argon2/bcrypt via `pwdlib` |
 | Payments | Paystack **test mode only** + simulated fallback | Live keys refused at startup |
 | Files | Storage abstraction: local private dir (default) / Cloudinary-compatible | Signed, short-lived URLs for private docs |
 | Notifications | `NotificationService` interface, console implementation | Email/SMS providers are TODO |
 | Infra | Docker Compose (db, api, web), `.env.example` | |
-| Tests | pytest (+ httpx TestClient) backend; Vitest + Testing Library frontend | |
+| Tests | pytest + pytest-asyncio (+ httpx AsyncClient) backend; Vitest + Testing Library frontend | |
 
 ## 3. Repository layout
 
@@ -299,7 +299,7 @@ Conventions: 401 unauthenticated, 403 wrong role/ownership, 404 not found *or* n
 - Identity and business documents are never public; public schemas exclude document URLs.
 - Agent phone/email shown only when `display_phone_publicly` / `display_email_publicly` is true.
 - CORS restricted to `CORS_ORIGINS`; secrets only from env vars; live Paystack keys rejected.
-- In-memory rate limit on login/register (documented placeholder for Redis-based limiter).
+- Rate limits on login (IP + account), registration, search, house-search requests, reports, uploads and reservation/payment actions; HTTP 429 + Retry-After; Redis-backed when `REDIS_URL` is set, in-memory development fallback otherwise ([RATE_LIMITING.md](RATE_LIMITING.md)).
 - Logging filter redacts `password`, `token`, `secret`, `authorization`; document contents never logged.
 - Every approval, rejection, suspension, payment, release, refund and status change writes `audit_log`.
 

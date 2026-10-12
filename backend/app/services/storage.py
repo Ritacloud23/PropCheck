@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import anyio
 import httpx
 from fastapi import UploadFile
 
@@ -80,7 +81,7 @@ def _new_key(prefix: str, ext: str) -> str:
     return f"{prefix}/{secrets.token_hex(16)}{ext}"
 
 
-def _write(base: Path, key: str, data: bytes) -> None:
+def _write_sync(base: Path, key: str, data: bytes) -> None:
     path = (base / key).resolve()
     if base not in path.parents:
         raise BadRequest("Invalid storage path.")
@@ -88,32 +89,37 @@ def _write(base: Path, key: str, data: bytes) -> None:
     path.write_bytes(data)
 
 
-def save_public(f: ValidatedFile, prefix: str) -> str:
+async def _write(base: Path, key: str, data: bytes) -> None:
+    """Disk writes run in a worker thread so large uploads never block the event loop."""
+    await anyio.to_thread.run_sync(_write_sync, base, key, data)
+
+
+async def save_public(f: ValidatedFile, prefix: str) -> str:
     """Returns a public URL."""
     if settings.storage_backend == "cloudinary" and settings.cloudinary_cloud_name:
-        return _cloudinary_upload(f, prefix)
+        return await _cloudinary_upload(f, prefix)
     key = _new_key(prefix, f.extension)
-    _write(public_dir(), key, f.data)
+    await _write(public_dir(), key, f.data)
     return f"{settings.api_public_url}/media/{key}"
 
 
-def save_public_bytes(data: bytes, prefix: str, ext: str) -> str:
+async def save_public_bytes(data: bytes, prefix: str, ext: str) -> str:
     """Used by the seed script for generated demo images."""
     key = _new_key(prefix, ext)
-    _write(public_dir(), key, data)
+    await _write(public_dir(), key, data)
     return f"{settings.api_public_url}/media/{key}"
 
 
-def save_private(f: ValidatedFile, prefix: str) -> str:
+async def save_private(f: ValidatedFile, prefix: str) -> str:
     """Returns a private storage key (NOT a URL)."""
     key = _new_key(prefix, f.extension)
-    _write(private_dir(), key, f.data)
+    await _write(private_dir(), key, f.data)
     return key
 
 
-def save_private_bytes(data: bytes, prefix: str, ext: str) -> str:
+async def save_private_bytes(data: bytes, prefix: str, ext: str) -> str:
     key = _new_key(prefix, ext)
-    _write(private_dir(), key, data)
+    await _write(private_dir(), key, data)
     return key
 
 
@@ -132,22 +138,22 @@ def signed_url(key: str | None) -> str | None:
     return f"/api/files/{sign_file_key(key)}"
 
 
-def _cloudinary_upload(f: ValidatedFile, prefix: str) -> str:
+async def _cloudinary_upload(f: ValidatedFile, prefix: str) -> str:
     ts = str(int(time.time()))
     folder = f"propcheck/{prefix}"
     to_sign = f"folder={folder}&timestamp={ts}{settings.cloudinary_api_secret}"
     signature = hashlib.sha1(to_sign.encode(), usedforsecurity=False).hexdigest()
-    resp = httpx.post(
-        f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload",
-        data={
-            "api_key": settings.cloudinary_api_key,
-            "timestamp": ts,
-            "folder": folder,
-            "signature": signature,
-        },
-        files={"file": (f.original_filename or f"upload{f.extension}", f.data, f.content_type)},
-        timeout=30,
-    )
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"https://api.cloudinary.com/v1_1/{settings.cloudinary_cloud_name}/image/upload",
+            data={
+                "api_key": settings.cloudinary_api_key,
+                "timestamp": ts,
+                "folder": folder,
+                "signature": signature,
+            },
+            files={"file": (f.original_filename or f"upload{f.extension}", f.data, f.content_type)},
+        )
     if resp.status_code != 200:
         raise BadRequest("Image upload failed. Please try again.")
     return resp.json()["secure_url"]

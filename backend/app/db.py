@@ -1,18 +1,22 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
-from sqlalchemy import create_engine
-from sqlmodel import Session
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+
+# expire_on_commit=False: with AsyncSession, touching an expired attribute would need implicit
+# (sync) IO. Every column default is Python-side, so committed objects are already up to date.
+SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-def get_session() -> Iterator[Session]:
+async def get_session() -> AsyncIterator[AsyncSession]:
     """One session per request. Services commit explicitly; anything uncommitted is rolled back."""
-    with Session(engine) as session:
+    async with SessionLocal() as session:
         try:
             yield session
         except Exception:
-            session.rollback()
+            await session.rollback()
             raise

@@ -22,9 +22,11 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgresql+psycopg://propcheck:propcheck@db:5432/propcheck
-      TEST_DATABASE_URL: postgresql+psycopg://propcheck:propcheck@db:5432/propcheck_test
+      DATABASE_URL: postgresql+asyncpg://propcheck:propcheck@db:5432/propcheck
+      TEST_DATABASE_URL: postgresql+asyncpg://propcheck:propcheck@db:5432/propcheck_test
       STORAGE_DIR: /data/storage
+      # The web container proxies browser/API traffic; trust its X-Forwarded-For (local stack only).
+      TRUSTED_PROXIES: 127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16
       API_PUBLIC_URL: http://localhost:8000
       CORS_ORIGINS: http://localhost:3000
       FRONTEND_URL: http://localhost:3000

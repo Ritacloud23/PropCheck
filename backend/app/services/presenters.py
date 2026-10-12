@@ -10,7 +10,8 @@ from collections.abc import Iterable
 from urllib.parse import quote
 
 from sqlalchemy import func
-from sqlmodel import Session, col, select
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
 from app.models import (
@@ -81,26 +82,30 @@ def effective_case_status(case: VerificationCase) -> VerificationStatus:
 # ------------------------------------------------------------------ agents
 
 
-def agent_stats(session: Session, agent_ids: Iterable[int]) -> dict[int, tuple[int, int]]:
+async def agent_stats(session: AsyncSession, agent_ids: Iterable[int]) -> dict[int, tuple[int, int]]:
     """agent_id -> (active public listings, open reports)."""
     ids = list(set(agent_ids))
     if not ids:
         return {}
     listings = dict(
-        session.exec(
-            select(Property.listing_agent_id, func.count())
-            .where(col(Property.listing_agent_id).in_(ids), Property.is_listed == True)  # noqa: E712
-            .group_by(Property.listing_agent_id)
+        (
+            await session.exec(
+                select(Property.listing_agent_id, func.count())
+                .where(col(Property.listing_agent_id).in_(ids), Property.is_listed == True)  # noqa: E712
+                .group_by(Property.listing_agent_id)
+            )
         ).all()
     )
     reports = dict(
-        session.exec(
-            select(AgentReport.agent_id, func.count())
-            .where(
-                col(AgentReport.agent_id).in_(ids),
-                col(AgentReport.status).in_([ReportStatus.OPEN, ReportStatus.IN_REVIEW]),
+        (
+            await session.exec(
+                select(AgentReport.agent_id, func.count())
+                .where(
+                    col(AgentReport.agent_id).in_(ids),
+                    col(AgentReport.status).in_([ReportStatus.OPEN, ReportStatus.IN_REVIEW]),
+                )
+                .group_by(AgentReport.agent_id)
             )
-            .group_by(AgentReport.agent_id)
         ).all()
     )
     return {i: (int(listings.get(i, 0)), int(reports.get(i, 0))) for i in ids}
@@ -169,11 +174,13 @@ def agent_public(
     )
 
 
-def latest_application(session: Session, profile_id: int) -> AgentVerification | None:
-    return session.exec(
-        select(AgentVerification)
-        .where(AgentVerification.agent_profile_id == profile_id)
-        .order_by(col(AgentVerification.id).desc())
+async def latest_application(session: AsyncSession, profile_id: int) -> AgentVerification | None:
+    return (
+        await session.exec(
+            select(AgentVerification)
+            .where(AgentVerification.agent_profile_id == profile_id)
+            .order_by(col(AgentVerification.id).desc())
+        )
     ).first()
 
 
@@ -189,8 +196,8 @@ def application_out(app: AgentVerification | None, *, with_links: bool) -> Agent
     return out
 
 
-def agent_private(session: Session, profile: AgentProfile, user: User) -> AgentPrivateOut:
-    stats = agent_stats(session, [profile.id]).get(profile.id, (0, 0))  # type: ignore[arg-type]
+async def agent_private(session: AsyncSession, profile: AgentProfile, user: User) -> AgentPrivateOut:
+    stats = (await agent_stats(session, [profile.id])).get(profile.id, (0, 0))  # type: ignore[arg-type]
     public = agent_public(profile, user, stats)
     return AgentPrivateOut(
         **public.model_dump(),
@@ -200,14 +207,14 @@ def agent_private(session: Session, profile: AgentProfile, user: User) -> AgentP
         private_email=profile.email,
         display_phone_publicly=profile.display_phone_publicly,
         display_email_publicly=profile.display_email_publicly,
-        latest_application=application_out(latest_application(session, profile.id), with_links=True),  # type: ignore[arg-type]
+        latest_application=application_out(await latest_application(session, profile.id), with_links=True),  # type: ignore[arg-type]
     )
 
 
 # ------------------------------------------------------------------ properties
 
 
-def can_manage_property(session: Session, prop: Property, user: User | None) -> bool:
+async def can_manage_property(session: AsyncSession, prop: Property, user: User | None) -> bool:
     if user is None:
         return False
     if user.role in STAFF:
@@ -215,18 +222,18 @@ def can_manage_property(session: Session, prop: Property, user: User | None) -> 
     if prop.owner_user_id == user.id:
         return True
     if prop.listing_agent_id:
-        agent = session.get(AgentProfile, prop.listing_agent_id)
+        agent = await session.get(AgentProfile, prop.listing_agent_id)
         return bool(agent and agent.user_id == user.id)
     return False
 
 
-def latest_case(
-    session: Session, property_id: int, *, exclude_draft: bool = False
+async def latest_case(
+    session: AsyncSession, property_id: int, *, exclude_draft: bool = False
 ) -> VerificationCase | None:
     q = select(VerificationCase).where(VerificationCase.property_id == property_id)
     if exclude_draft:
         q = q.where(VerificationCase.status != VerificationStatus.DRAFT)
-    return session.exec(q.order_by(col(VerificationCase.id).desc())).first()
+    return (await session.exec(q.order_by(col(VerificationCase.id).desc()))).first()
 
 
 def verification_badge(prop: Property, case: VerificationCase | None) -> VerificationBadge:
@@ -241,13 +248,15 @@ def verification_badge(prop: Property, case: VerificationCase | None) -> Verific
     )
 
 
-def _cover_photos(session: Session, property_ids: list[int]) -> dict[int, str]:
+async def _cover_photos(session: AsyncSession, property_ids: list[int]) -> dict[int, str]:
     if not property_ids:
         return {}
-    rows = session.exec(
-        select(PropertyMedia)
-        .where(col(PropertyMedia.property_id).in_(property_ids))
-        .order_by(col(PropertyMedia.id).asc())
+    rows = (
+        await session.exec(
+            select(PropertyMedia)
+            .where(col(PropertyMedia.property_id).in_(property_ids))
+            .order_by(col(PropertyMedia.id).asc())
+        )
     ).all()
     covers: dict[int, str] = {}
     for m in rows:
@@ -255,27 +264,31 @@ def _cover_photos(session: Session, property_ids: list[int]) -> dict[int, str]:
     return covers
 
 
-def property_cards(session: Session, props: list[Property]) -> list[PropertyCard]:
+async def property_cards(session: AsyncSession, props: list[Property]) -> list[PropertyCard]:
     ids = [p.id for p in props]
-    covers = _cover_photos(session, ids)  # type: ignore[arg-type]
+    covers = await _cover_photos(session, ids)  # type: ignore[arg-type]
     agent_ids = {p.listing_agent_id for p in props if p.listing_agent_id}
     agents: dict[int, tuple[AgentProfile, User]] = {}
     if agent_ids:
-        for profile, user in session.exec(
-            select(AgentProfile, User)
-            .join(User, User.id == AgentProfile.user_id)  # type: ignore[arg-type]
-            .where(col(AgentProfile.id).in_(agent_ids))
+        for profile, user in (
+            await session.exec(
+                select(AgentProfile, User)
+                .join(User, User.id == AgentProfile.user_id)  # type: ignore[arg-type]
+                .where(col(AgentProfile.id).in_(agent_ids))
+            )
         ).all():
             agents[profile.id] = (profile, user)  # type: ignore[index]
     cases: dict[int, VerificationCase] = {}
     if ids:
-        for case in session.exec(
-            select(VerificationCase)
-            .where(
-                col(VerificationCase.property_id).in_(ids),
-                VerificationCase.status != VerificationStatus.DRAFT,
+        for case in (
+            await session.exec(
+                select(VerificationCase)
+                .where(
+                    col(VerificationCase.property_id).in_(ids),
+                    VerificationCase.status != VerificationStatus.DRAFT,
+                )
+                .order_by(col(VerificationCase.id).asc())
             )
-            .order_by(col(VerificationCase.id).asc())
         ).all():
             cases[case.property_id] = case  # last one wins = latest
     out = []
@@ -323,31 +336,35 @@ def share_url(prop: Property) -> str:
     return f"{settings.frontend_url}/properties/{quote(prop.public_slug)}"
 
 
-def property_detail(session: Session, prop: Property, viewer: User | None) -> PropertyDetail:
-    card = property_cards(session, [prop])[0]
-    media = session.exec(
-        select(PropertyMedia).where(PropertyMedia.property_id == prop.id).order_by(col(PropertyMedia.id))
+async def property_detail(session: AsyncSession, prop: Property, viewer: User | None) -> PropertyDetail:
+    card = (await property_cards(session, [prop]))[0]
+    media = (
+        await session.exec(
+            select(PropertyMedia).where(PropertyMedia.property_id == prop.id).order_by(col(PropertyMedia.id))
+        )
     ).all()
     agent_profile = None
     if prop.listing_agent_id:
-        profile = session.get(AgentProfile, prop.listing_agent_id)
+        profile = await session.get(AgentProfile, prop.listing_agent_id)
         if profile:
-            user = session.get(User, profile.user_id)
-            stats = agent_stats(session, [profile.id]).get(profile.id, (0, 0))  # type: ignore[arg-type]
+            user = await session.get(User, profile.user_id)
+            stats = (await agent_stats(session, [profile.id])).get(profile.id, (0, 0))  # type: ignore[arg-type]
             agent_profile = agent_public(profile, user, stats)  # type: ignore[arg-type]
-    manage = can_manage_property(session, prop, viewer)
+    manage = await can_manage_property(session, prop, viewer)
     documents = None
     case_id = None
     if manage:
         documents = [
             document_out(d)
-            for d in session.exec(
-                select(PropertyDocument)
-                .where(PropertyDocument.property_id == prop.id)
-                .order_by(col(PropertyDocument.id))
+            for d in (
+                await session.exec(
+                    select(PropertyDocument)
+                    .where(PropertyDocument.property_id == prop.id)
+                    .order_by(col(PropertyDocument.id))
+                )
             ).all()
         ]
-        case = latest_case(session, prop.id)  # type: ignore[arg-type]
+        case = await latest_case(session, prop.id)  # type: ignore[arg-type]
         case_id = case.id if case else None
     return PropertyDetail(
         **card.model_dump(),
@@ -376,11 +393,12 @@ def property_detail(session: Session, prop: Property, viewer: User | None) -> Pr
     )
 
 
-def user_names(session: Session, ids: Iterable[int | None]) -> dict[int, str]:
+async def user_names(session: AsyncSession, ids: Iterable[int | None]) -> dict[int, str]:
     wanted = {i for i in ids if i}
     if not wanted:
         return {}
-    return {u.id: u.full_name for u in session.exec(select(User).where(col(User.id).in_(wanted))).all()}  # type: ignore[misc]
+    users = (await session.exec(select(User).where(col(User.id).in_(wanted)))).all()
+    return {u.id: u.full_name for u in users}  # type: ignore[misc]
 
 
 def property_ref(prop: Property):

@@ -7,7 +7,6 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "sqlmodel>=0.0.22",
-    "psycopg[binary]>=3.2",
     "alembic>=1.13",
     "pydantic-settings>=2.4",
     "email-validator>=2.2",
@@ -15,6 +14,9 @@ dependencies = [
     "pwdlib[argon2]>=0.2",
     "python-multipart>=0.0.9",
     "httpx>=0.27",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.30",
+    "redis>=5.0",
 ]
 
 [dependency-groups]
@@ -22,6 +24,7 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pytest-asyncio>=1.0",
 ]
 
 [tool.uv]
@@ -30,6 +33,10 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+asyncio_mode = "auto"
+# One event loop for the whole run: the async engine and its pooled connections are bound to it.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.ruff]

@@ -7,8 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
-    database_url: str = "postgresql+psycopg://propcheck:propcheck@localhost:5434/propcheck"
-    test_database_url: str = "postgresql+psycopg://propcheck:propcheck@localhost:5434/propcheck_test"
+    database_url: str = "postgresql+asyncpg://propcheck:propcheck@localhost:5434/propcheck"
+    test_database_url: str = "postgresql+asyncpg://propcheck:propcheck@localhost:5434/propcheck_test"
 
     jwt_secret: str = "dev-only-insecure-jwt-secret-change-me"
     jwt_algorithm: str = "HS256"
@@ -33,7 +33,22 @@ class Settings(BaseSettings):
     paystack_public_key: str = ""
     paystack_callback_url: str = "http://localhost:3000/dashboard/renter/reservations"
 
-    auth_rate_limit_per_minute: int = 20
+    # Rate limiting (docs/RATE_LIMITING.md). Rates are "<count>/<second|minute|hour|day>".
+    rate_limit_enabled: bool = True
+    # Shared counters for production / several API processes. Empty = in-memory development fallback.
+    redis_url: str = ""
+    # Proxies whose X-Forwarded-For is believed (comma-separated IPs or CIDRs), e.g. the Next.js server.
+    trusted_proxies: str = "127.0.0.1,::1"
+    rate_limit_login: str = "5/minute"  # per IP + account
+    rate_limit_login_ip: str = "30/minute"  # per IP, across accounts (password spraying)
+    rate_limit_register: str = "5/hour"  # per IP
+    rate_limit_password_reset: str = "3/hour"  # per IP + account (for the planned reset endpoint)
+    rate_limit_property_search: str = "60/minute"  # per IP
+    rate_limit_nearby_search: str = "60/minute"  # per IP
+    rate_limit_house_search: str = "5/hour"  # per user (IP if anonymous)
+    rate_limit_reports: str = "5/hour"  # per user (IP if anonymous)
+    rate_limit_uploads: str = "20/hour"  # per user
+    rate_limit_reservations: str = "10/minute"  # per user
 
     # Comma-separated states the product serves. Each must exist in app/reference LOCATIONS.
     active_states: str = "Lagos,Rivers,Enugu,Anambra,Imo"
@@ -47,6 +62,33 @@ class Settings(BaseSettings):
     agent_verification_days: int = 365
     reservation_terms_version: str = "DEMO-2026-10-v1"
     reservation_deposit_percent: int = 10
+
+    @field_validator("database_url", "test_database_url")
+    @classmethod
+    def _use_async_driver(cls, v: str) -> str:
+        """The app is fully async (asyncpg). Older .env files with a sync driver keep working."""
+        scheme, sep, rest = v.partition("://")
+        if sep and scheme in ("postgres", "postgresql", "postgresql+psycopg", "postgresql+psycopg2"):
+            return f"postgresql+asyncpg://{rest}"
+        return v
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _valid_proxies(cls, v: str) -> str:
+        import ipaddress
+
+        for part in filter(None, (p.strip() for p in v.split(","))):
+            ipaddress.ip_network(part, strict=False)  # raises on a typo instead of silently trusting nothing
+        return v
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _valid_rates(cls, v, info):
+        if info.field_name.startswith("rate_limit_") and isinstance(v, str):
+            from app.rates import parse_rate
+
+            parse_rate(v)
+        return v
 
     @field_validator("paystack_secret_key")
     @classmethod

@@ -9,7 +9,8 @@ Phone numbers use an obviously fake 0800 000 0xxx pattern.
 import math
 import random
 
-from sqlmodel import Session, func, select
+from sqlmodel import func, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models import NearbyPlace
 from app.models.enums import PlaceCategory
@@ -139,11 +140,11 @@ def build_demo_places() -> list[NearbyPlace]:
     return places
 
 
-def seed_nearby_places(session: Session) -> int:
+async def seed_nearby_places(session: AsyncSession) -> int:
     """Insert demo places once. Returns the number inserted (0 if places already exist)."""
-    if session.exec(select(func.count()).select_from(NearbyPlace)).one():
+    if (await session.exec(select(func.count()).select_from(NearbyPlace))).one():
         return 0
     places = build_demo_places()
     session.add_all(places)
-    session.commit()
+    await session.commit()
     return len(places)

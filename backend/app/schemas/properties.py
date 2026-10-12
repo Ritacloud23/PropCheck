@@ -15,9 +15,14 @@ from app.schemas.agents import AgentPublicOut, AgentSummary
 from app.schemas.common import Out, TimelineEntry, validate_state
 
 
+def _blank_description(v: str | None) -> str:
+    """Forms send null for an empty text box; the column is NOT NULL, so no description is ""."""
+    return v or ""
+
+
 class PropertyCreate(BaseModel):
     title: str = Field(min_length=5, max_length=160)
-    description: str = Field(default="", max_length=5000)
+    description: str | None = Field(default="", max_length=5000)
     address: str = Field(min_length=5, max_length=300)
     landmark: str | None = Field(default=None, max_length=200)
     state: str
@@ -43,6 +48,8 @@ class PropertyCreate(BaseModel):
     @classmethod
     def _state(cls, v: str) -> str:
         return validate_state(v)
+
+    _description = field_validator("description")(_blank_description)
 
 
 class PropertyUpdate(BaseModel):
@@ -73,6 +80,9 @@ class PropertyUpdate(BaseModel):
     @classmethod
     def _state(cls, v: str | None) -> str | None:
         return validate_state(v) if v is not None else v
+
+    # Explicit null clears the description; an omitted field stays unset (exclude_unset).
+    _description = field_validator("description")(_blank_description)
 
 
 class MediaOut(Out):

@@ -19,7 +19,9 @@ def _offset(km_north: float = 0.0, km_east: float = 0.0) -> tuple[float, float]:
     return lat + km_north / 111.32, lng + km_east / (111.32 * math.cos(math.radians(lat)))
 
 
-def add_place(session, name: str, category: PlaceCategory, km_north: float = 0.0, km_east: float = 0.0, **kw):
+async def add_place(
+    session, name: str, category: PlaceCategory, km_north: float = 0.0, km_east: float = 0.0, **kw
+):
     lat, lng = _offset(km_north, km_east)
     place = NearbyPlace(
         name=name,
@@ -33,14 +35,14 @@ def add_place(session, name: str, category: PlaceCategory, km_north: float = 0.0
         **kw,
     )
     session.add(place)
-    session.commit()
-    session.refresh(place)
+    await session.commit()
+    await session.refresh(place)
     return place
 
 
-def search(client, **params):
+async def search(client, **params):
     base = {"latitude": ORIGIN[0], "longitude": ORIGIN[1]}
-    return client.get("/api/nearby-places", params={**base, **params})
+    return await client.get("/api/nearby-places", params={**base, **params})
 
 
 # ---------------------------------------------------------------- distance maths & formatting
@@ -80,11 +82,11 @@ def test_distance_formatting(km, label):
 # ---------------------------------------------------------------- search endpoint
 
 
-def test_sorted_by_distance_with_distance_fields(client, session):
-    add_place(session, "Far Market", PlaceCategory.MARKET, km_north=2.0)
-    add_place(session, "Near Kitchen", PlaceCategory.RESTAURANT, km_east=0.3)
-    add_place(session, "Middle Chapel", PlaceCategory.CHURCH, km_north=-1.0)
-    r = search(client, radius_km=5)
+async def test_sorted_by_distance_with_distance_fields(client, session):
+    await add_place(session, "Far Market", PlaceCategory.MARKET, km_north=2.0)
+    await add_place(session, "Near Kitchen", PlaceCategory.RESTAURANT, km_east=0.3)
+    await add_place(session, "Middle Chapel", PlaceCategory.CHURCH, km_north=-1.0)
+    r = await search(client, radius_km=5)
     assert r.status_code == 200
     body = r.json()
     names = [p["name"] for p in body["items"]]
@@ -97,45 +99,47 @@ def test_sorted_by_distance_with_distance_fields(client, session):
     assert body["count"] == 3 and body["radius_km"] == 5
 
 
-def test_filtered_by_category(client, session):
-    add_place(session, "Corner Market", PlaceCategory.MARKET, km_north=0.2)
-    add_place(session, "Palm Lounge", PlaceCategory.CLUB, km_north=0.4)
-    add_place(session, "Pepper Soup Place", PlaceCategory.RESTAURANT, km_east=0.5)
-    r = search(client, category="CLUB")
+async def test_filtered_by_category(client, session):
+    await add_place(session, "Corner Market", PlaceCategory.MARKET, km_north=0.2)
+    await add_place(session, "Palm Lounge", PlaceCategory.CLUB, km_north=0.4)
+    await add_place(session, "Pepper Soup Place", PlaceCategory.RESTAURANT, km_east=0.5)
+    r = await search(client, category="CLUB")
     assert [p["name"] for p in r.json()["items"]] == ["Palm Lounge"]
     assert r.json()["category"] == "CLUB"
 
 
-def test_places_outside_radius_excluded(client, session):
-    add_place(session, "Inside", PlaceCategory.MARKET, km_north=0.9)
-    add_place(session, "Just outside", PlaceCategory.MARKET, km_north=1.2)
+async def test_places_outside_radius_excluded(client, session):
+    await add_place(session, "Inside", PlaceCategory.MARKET, km_north=0.9)
+    await add_place(session, "Just outside", PlaceCategory.MARKET, km_north=1.2)
     # Inside the bounding box (corner) but outside the circle: must still be excluded.
-    add_place(session, "Box corner", PlaceCategory.MARKET, km_north=0.9, km_east=0.9)
-    r = search(client, radius_km=1)
+    await add_place(session, "Box corner", PlaceCategory.MARKET, km_north=0.9, km_east=0.9)
+    r = await search(client, radius_km=1)
     assert [p["name"] for p in r.json()["items"]] == ["Inside"]
 
 
-def test_inactive_places_hidden(client, session):
-    add_place(session, "Closed Market", PlaceCategory.MARKET, km_north=0.1, is_active=False)
-    assert search(client).json()["items"] == []
+async def test_inactive_places_hidden(client, session):
+    await add_place(session, "Closed Market", PlaceCategory.MARKET, km_north=0.1, is_active=False)
+    assert (await search(client)).json()["items"] == []
 
 
-def test_empty_results(client):
-    r = client.get("/api/nearby-places", params={"latitude": 6.0, "longitude": 4.0, "radius_km": 1})
+async def test_empty_results(client):
+    r = await client.get("/api/nearby-places", params={"latitude": 6.0, "longitude": 4.0, "radius_km": 1})
     assert r.status_code == 200
     assert r.json()["items"] == [] and r.json()["count"] == 0
 
 
-def test_invalid_category_and_radius_rejected(client):
-    assert search(client, category="MOSQUE_OR_BAR").status_code == 422
-    assert search(client, radius_km=50).status_code == 422  # above the 10 km cap
-    assert search(client, radius_km=0).status_code == 422
-    assert client.get("/api/nearby-places", params={"latitude": 95, "longitude": 7}).status_code == 422
-    assert client.get("/api/nearby-places", params={"longitude": 7}).status_code == 422
+async def test_invalid_category_and_radius_rejected(client):
+    assert (await search(client, category="MOSQUE_OR_BAR")).status_code == 422
+    assert (await search(client, radius_km=50)).status_code == 422  # above the 10 km cap
+    assert (await search(client, radius_km=0)).status_code == 422
+    assert (
+        await client.get("/api/nearby-places", params={"latitude": 95, "longitude": 7})
+    ).status_code == 422
+    assert (await client.get("/api/nearby-places", params={"longitude": 7})).status_code == 422
 
 
-def test_response_hides_internal_fields(client, session):
-    add_place(
+async def test_response_hides_internal_fields(client, session):
+    await add_place(
         session,
         "Demo Bukka",
         PlaceCategory.RESTAURANT,
@@ -143,7 +147,7 @@ def test_response_hides_internal_fields(client, session):
         source="DEMO_SEED",
         phone_number="+2348000001234",
     )
-    item = search(client).json()["items"][0]
+    item = (await search(client)).json()["items"][0]
     assert item["is_demo_data"] is True
     assert item["phone_number"] == "+2348000001234"
     for hidden in ("is_active", "source", "created_at", "updated_at"):
@@ -154,59 +158,62 @@ def test_response_hides_internal_fields(client, session):
 # ---------------------------------------------------------------- place reports
 
 
-def test_place_report_created_and_audited(client, session):
-    place = add_place(session, "Wrong Hours Kitchen", PlaceCategory.RESTAURANT, km_north=0.1)
+async def test_place_report_created_and_audited(client, session):
+    place = await add_place(session, "Wrong Hours Kitchen", PlaceCategory.RESTAURANT, km_north=0.1)
     payload = {"reason": "WRONG_OPENING_HOURS", "description": "Closes at 6pm, not 10pm."}
-    assert client.post(f"/api/nearby-places/{place.id}/report", json=payload).status_code == 401
+    assert (await client.post(f"/api/nearby-places/{place.id}/report", json=payload)).status_code == 401
 
-    user, headers = make_user(session, Role.RENTER)
-    r = client.post(f"/api/nearby-places/{place.id}/report", json=payload, headers=headers)
+    user, headers = await make_user(session, Role.RENTER)
+    r = await client.post(f"/api/nearby-places/{place.id}/report", json=payload, headers=headers)
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["status"] == "OPEN" and body["place_name"] == "Wrong Hours Kitchen"
     assert body["reviewer_notes"] is None and body["reporter_name"] is None  # staff-only fields
-    report = session.get(PlaceReport, body["id"])
+    report = await session.get(PlaceReport, body["id"])
     assert report.reporter_id == user.id
-    assert session.exec(select(AuditLog).where(AuditLog.action == "PLACE_REPORTED")).first()
+    assert (await session.exec(select(AuditLog).where(AuditLog.action == "PLACE_REPORTED"))).first()
     # Same user, same place, still open -> duplicate refused.
     assert (
-        client.post(f"/api/nearby-places/{place.id}/report", json=payload, headers=headers).status_code == 409
-    )
+        await client.post(f"/api/nearby-places/{place.id}/report", json=payload, headers=headers)
+    ).status_code == 409
     # Invalid reason and unknown place.
     assert (
-        client.post(
-            f"/api/nearby-places/{place.id}/report", json={"reason": "BORING"}, headers=headers
-        ).status_code
-        == 422
-    )
-    assert client.post("/api/nearby-places/999999/report", json=payload, headers=headers).status_code == 404
+        await client.post(f"/api/nearby-places/{place.id}/report", json={"reason": "BORING"}, headers=headers)
+    ).status_code == 422
+    assert (
+        await client.post("/api/nearby-places/999999/report", json=payload, headers=headers)
+    ).status_code == 404
 
 
-def test_reviewer_resolves_report_and_hides_place(client, session):
-    place = add_place(session, "Gone Market", PlaceCategory.MARKET, km_north=0.1)
-    _, renter = make_user(session, Role.RENTER)
-    _, reviewer = make_user(session, Role.REVIEWER)
-    report = client.post(
-        f"/api/nearby-places/{place.id}/report", json={"reason": "PERMANENTLY_CLOSED"}, headers=renter
+async def test_reviewer_resolves_report_and_hides_place(client, session):
+    place = await add_place(session, "Gone Market", PlaceCategory.MARKET, km_north=0.1)
+    _, renter = await make_user(session, Role.RENTER)
+    _, reviewer = await make_user(session, Role.REVIEWER)
+    report = (
+        await client.post(
+            f"/api/nearby-places/{place.id}/report", json={"reason": "PERMANENTLY_CLOSED"}, headers=renter
+        )
     ).json()
 
-    assert client.get("/api/reviewer/place-reports", headers=renter).status_code == 403
-    queue = client.get("/api/reviewer/place-reports", headers=reviewer).json()
+    assert (await client.get("/api/reviewer/place-reports", headers=renter)).status_code == 403
+    queue = (await client.get("/api/reviewer/place-reports", headers=reviewer)).json()
     assert report["id"] in [q["id"] for q in queue]
 
     url = f"/api/reviewer/place-reports/{report['id']}/resolve"
-    assert client.post(url, json={"reason": ""}, headers=reviewer).status_code == 422
-    r = client.post(url, json={"reason": "Confirmed closed", "deactivate_place": True}, headers=reviewer)
+    assert (await client.post(url, json={"reason": ""}, headers=reviewer)).status_code == 422
+    r = await client.post(
+        url, json={"reason": "Confirmed closed", "deactivate_place": True}, headers=reviewer
+    )
     assert r.status_code == 200 and r.json()["status"] == "RESOLVED" and r.json()["place_is_active"] is False
-    assert search(client).json()["items"] == []
-    assert client.post(url, json={"reason": "again"}, headers=reviewer).status_code == 409
+    assert (await search(client)).json()["items"] == []
+    assert (await client.post(url, json={"reason": "again"}, headers=reviewer)).status_code == 409
 
 
 # ---------------------------------------------------------------- coverage
 
 
-def test_only_five_launch_states_in_filters(client):
-    ref = client.get("/api/reference").json()
+async def test_only_five_launch_states_in_filters(client):
+    ref = (await client.get("/api/reference")).json()
     assert ref["states"] == ["Lagos", "Rivers", "Enugu", "Anambra", "Imo"]
     assert set(ref["locations"]) == {"Lagos", "Rivers", "Enugu", "Anambra", "Imo"}
     for northern in ("FCT", "Kano", "Kaduna", "Borno", "Sokoto", "Plateau"):
@@ -214,19 +221,21 @@ def test_only_five_launch_states_in_filters(client):
     assert ref["place_categories"] == ["MARKET", "RESTAURANT", "CHURCH", "CLUB"]
 
 
-def test_port_harcourt_is_major_city_under_rivers(client):
-    rivers = client.get("/api/reference").json()["locations"]["Rivers"]
+async def test_port_harcourt_is_major_city_under_rivers(client):
+    rivers = (await client.get("/api/reference")).json()["locations"]["Rivers"]
     assert rivers[0]["city"] == "Port Harcourt" and rivers[0]["major"] is True
     areas = [a["area"] for a in rivers[0]["areas"]]
     assert {"GRA Phase 2", "Old GRA", "Rumuola", "Trans-Amadi"} <= set(areas)
     assert all(a["lga"] for a in rivers[0]["areas"])
 
 
-def test_listings_outside_launch_states_rejected(client, session):
+async def test_listings_outside_launch_states_rejected(client, session):
     from tests.helpers import PROPERTY, create_agent
 
-    _, headers, _ = create_agent(client, session)
-    r = client.post("/api/properties", json={**PROPERTY, "state": "FCT", "city": "Abuja"}, headers=headers)
+    _, headers, _ = await create_agent(client, session)
+    r = await client.post(
+        "/api/properties", json={**PROPERTY, "state": "FCT", "city": "Abuja"}, headers=headers
+    )
     assert r.status_code == 422
     assert "does not cover FCT" in r.json()["detail"]
 

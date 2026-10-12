@@ -3,7 +3,7 @@
 import itertools
 from datetime import timedelta
 
-from sqlmodel import Session
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models import User
 from app.models.base import utcnow
@@ -19,18 +19,20 @@ PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 _seq = itertools.count(1)
 
 
-def make_user(session: Session, role: Role = Role.RENTER, name: str | None = None) -> tuple[User, dict]:
+async def make_user(
+    session: AsyncSession, role: Role = Role.RENTER, name: str | None = None
+) -> tuple[User, dict]:
     n = next(_seq)
     user = User(
         full_name=name or f"{role.value.title()} {n}",
         email=f"{role.value.lower()}{n}@example.com",
         phone="+2348031234567",
-        password_hash=hash_password("Password123"),
+        password_hash=await hash_password("Password123"),
         role=role,
     )
     session.add(user)
-    session.commit()
-    session.refresh(user)
+    await session.commit()
+    await session.refresh(user)
     return user, {"Authorization": f"Bearer {create_access_token(user.id, role.value)}"}
 
 
@@ -72,15 +74,15 @@ PROPERTY = {
 }
 
 
-def create_agent(client, session, **overrides) -> tuple[User, dict, dict]:
-    user, headers = make_user(session, Role.AGENT)
-    r = client.post("/api/agents/profile", json={**AGENT_PROFILE, **overrides}, headers=headers)
+async def create_agent(client, session, **overrides) -> tuple[User, dict, dict]:
+    user, headers = await make_user(session, Role.AGENT)
+    r = await client.post("/api/agents/profile", json={**AGENT_PROFILE, **overrides}, headers=headers)
     assert r.status_code == 201, r.text
     return user, headers, r.json()
 
 
-def submit_agent_application(client, headers) -> dict:
-    r = client.post(
+async def submit_agent_application(client, headers) -> dict:
+    r = await client.post(
         "/api/agents/profile/verification",
         files={"identity_document": ("id.pdf", PDF, "application/pdf")},
         data={"evidence_notes": "NIN slip attached"},
@@ -90,29 +92,29 @@ def submit_agent_application(client, headers) -> dict:
     return r.json()
 
 
-def verify_agent(client, session, agent_headers, agent_id, reviewer_headers=None) -> dict:
+async def verify_agent(client, session, agent_headers, agent_id, reviewer_headers=None) -> dict:
     if reviewer_headers is None:
-        _, reviewer_headers = make_user(session, Role.REVIEWER)
-    submit_agent_application(client, agent_headers)
-    r = client.post(f"/api/reviewer/agents/{agent_id}/start-review", json={}, headers=reviewer_headers)
+        _, reviewer_headers = await make_user(session, Role.REVIEWER)
+    await submit_agent_application(client, agent_headers)
+    r = await client.post(f"/api/reviewer/agents/{agent_id}/start-review", json={}, headers=reviewer_headers)
     assert r.status_code == 200, r.text
-    r = client.post(f"/api/reviewer/agents/{agent_id}/approve", json={}, headers=reviewer_headers)
+    r = await client.post(f"/api/reviewer/agents/{agent_id}/approve", json={}, headers=reviewer_headers)
     assert r.status_code == 200, r.text
     return r.json()
 
 
-def create_property(client, headers, **overrides) -> dict:
-    r = client.post("/api/properties", json={**PROPERTY, **overrides}, headers=headers)
+async def create_property(client, headers, **overrides) -> dict:
+    r = await client.post("/api/properties", json={**PROPERTY, **overrides}, headers=headers)
     assert r.status_code == 201, r.text
     return r.json()
 
 
-def upload_evidence(client, headers, property_id) -> None:
-    r = client.post(
+async def upload_evidence(client, headers, property_id) -> None:
+    r = await client.post(
         f"/api/properties/{property_id}/media", files={"file": ("p.png", PNG, "image/png")}, headers=headers
     )
     assert r.status_code == 201, r.text
-    r = client.post(
+    r = await client.post(
         f"/api/properties/{property_id}/documents",
         files={"file": ("authority.pdf", PDF, "application/pdf")},
         data={"document_type": "AUTHORITY_LETTER"},
@@ -121,20 +123,20 @@ def upload_evidence(client, headers, property_id) -> None:
     assert r.status_code == 201, r.text
 
 
-def open_and_submit_case(client, headers, property_id) -> dict:
-    upload_evidence(client, headers, property_id)
-    r = client.post(f"/api/properties/{property_id}/verification", headers=headers)
+async def open_and_submit_case(client, headers, property_id) -> dict:
+    await upload_evidence(client, headers, property_id)
+    r = await client.post(f"/api/properties/{property_id}/verification", headers=headers)
     assert r.status_code == 201, r.text
     case = r.json()
-    r = client.post(f"/api/verification-cases/{case['id']}/submit", headers=headers)
+    r = await client.post(f"/api/verification-cases/{case['id']}/submit", headers=headers)
     assert r.status_code == 200, r.text
     return r.json()
 
 
-def pass_all_checks(client, reviewer_headers, case_id) -> dict:
+async def pass_all_checks(client, reviewer_headers, case_id) -> dict:
     data = {}
     for ct in CheckType:
-        r = client.post(
+        r = await client.post(
             f"/api/verification-cases/{case_id}/checks",
             json={
                 "check_type": ct.value,
@@ -148,24 +150,24 @@ def pass_all_checks(client, reviewer_headers, case_id) -> dict:
     return data
 
 
-def move_case(client, headers, case_id, to_status, **extra):
-    return client.post(
+async def move_case(client, headers, case_id, to_status, **extra):
+    return await client.post(
         f"/api/verification-cases/{case_id}/transition",
         json={"to_status": to_status, **extra},
         headers=headers,
     )
 
 
-def verified_property(client, session) -> dict:
+async def verified_property(client, session) -> dict:
     """Verified agent + property verified by an independent reviewer. Returns ids and headers."""
-    agent_user, agent_headers, profile = create_agent(client, session)
-    _, reviewer_headers = make_user(session, Role.REVIEWER)
-    verify_agent(client, session, agent_headers, profile["id"], reviewer_headers)
-    prop = create_property(client, agent_headers)
-    case = open_and_submit_case(client, agent_headers, prop["id"])
-    assert move_case(client, reviewer_headers, case["id"], "IN_REVIEW").status_code == 200
-    pass_all_checks(client, reviewer_headers, case["id"])
-    r = move_case(client, reviewer_headers, case["id"], "VERIFIED")
+    agent_user, agent_headers, profile = await create_agent(client, session)
+    _, reviewer_headers = await make_user(session, Role.REVIEWER)
+    await verify_agent(client, session, agent_headers, profile["id"], reviewer_headers)
+    prop = await create_property(client, agent_headers)
+    case = await open_and_submit_case(client, agent_headers, prop["id"])
+    assert (await move_case(client, reviewer_headers, case["id"], "IN_REVIEW")).status_code == 200
+    await pass_all_checks(client, reviewer_headers, case["id"])
+    r = await move_case(client, reviewer_headers, case["id"], "VERIFIED")
     assert r.status_code == 200, r.text
     return {
         "agent_user": agent_user,

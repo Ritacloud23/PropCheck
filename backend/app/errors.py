@@ -46,7 +46,16 @@ class TooManyRequests(AppError):
     status_code = 429
     code = "rate_limited"
 
+    def __init__(self, message: str, *, retry_after: int | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 async def app_error_handler(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "code": exc.code})
+    content: dict = {"detail": exc.message, "code": exc.code}
+    headers = None
+    if isinstance(exc, TooManyRequests) and exc.retry_after is not None:
+        content["retry_after"] = exc.retry_after
+        headers = {"Retry-After": str(exc.retry_after)}
+    return JSONResponse(status_code=exc.status_code, content=content, headers=headers)

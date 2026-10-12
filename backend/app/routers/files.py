@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 
 @router.get("/{token}")
-def download_private_file(token: str) -> FileResponse:
+async def download_private_file(token: str) -> FileResponse:
     """Serve a private document. Tokens are HMAC-signed, expire after 10 minutes, and are only
     issued to authorised viewers (owner/listing agent, the uploader, or reviewers)."""
     key = verify_file_token(token)

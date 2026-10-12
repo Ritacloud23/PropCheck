@@ -19,14 +19,14 @@ from app.services.workflows import INSPECTION_BOOKING, property_manager_ids
 router = APIRouter(tags=["inspections"])
 
 
-def _booking_out(session, booking: InspectionBooking, viewer: User) -> BookingOut:
-    prop = session.get(Property, booking.property_id)
-    slot = session.get(InspectionSlot, booking.slot_id)
-    is_manager = viewer.id in property_manager_ids(session, prop) or viewer.role in (
+async def _booking_out(session, booking: InspectionBooking, viewer: User) -> BookingOut:
+    prop = await session.get(Property, booking.property_id)
+    slot = await session.get(InspectionSlot, booking.slot_id)
+    is_manager = viewer.id in await property_manager_ids(session, prop) or viewer.role in (
         Role.REVIEWER,
         Role.ADMIN,
     )
-    renter = session.get(User, booking.renter_id) if is_manager else None
+    renter = await session.get(User, booking.renter_id) if is_manager else None
     return BookingOut(
         id=booking.id,  # type: ignore[arg-type]
         property=presenters.property_ref(prop),
@@ -50,33 +50,37 @@ def _booking_out(session, booking: InspectionBooking, viewer: User) -> BookingOu
 
 @router.get("/api/properties/{property_id}/inspection-slots", response_model=list[SlotOut])
 @router.get("/api/properties/{property_id}/slots", response_model=list[SlotOut], include_in_schema=False)
-def list_slots(property_id: int, session: SessionDep, viewer: OptionalUser) -> list[InspectionSlot]:
+async def list_slots(property_id: int, session: SessionDep, viewer: OptionalUser) -> list[InspectionSlot]:
     """Public: upcoming OPEN slots. Owner / listing agent: every slot."""
-    prop = load_property(session, property_id)
+    prop = await load_property(session, property_id)
     query = select(InspectionSlot).where(InspectionSlot.property_id == prop.id)
-    if not presenters.can_manage_property(session, prop, viewer):
+    if not await presenters.can_manage_property(session, prop, viewer):
         if not prop.is_listed:
             raise NotFound("Property not found.")
         query = query.where(InspectionSlot.status == SlotStatus.OPEN, InspectionSlot.start_time > utcnow())
-    return list(session.exec(query.order_by(col(InspectionSlot.start_time))).all())
+    return list((await session.exec(query.order_by(col(InspectionSlot.start_time)))).all())
 
 
 @router.post("/api/properties/{property_id}/inspection-slots", response_model=SlotOut, status_code=201)
 @router.post(
     "/api/properties/{property_id}/slots", response_model=SlotOut, status_code=201, include_in_schema=False
 )
-def create_slot(property_id: int, body: SlotIn, user: ListerUser, session: SessionDep) -> InspectionSlot:
-    prop = load_property(session, property_id)
-    require_manager(session, prop, user)
+async def create_slot(
+    property_id: int, body: SlotIn, user: ListerUser, session: SessionDep
+) -> InspectionSlot:
+    prop = await load_property(session, property_id)
+    await require_manager(session, prop, user)
     if body.start_time <= utcnow():
         raise BadRequest("Inspection slots must be in the future.")
     # Friendly pre-check; the EXCLUDE constraint is the real guarantee under concurrency.
-    overlap = session.exec(
-        select(InspectionSlot).where(
-            InspectionSlot.property_id == prop.id,
-            InspectionSlot.status != SlotStatus.CANCELLED,
-            col(InspectionSlot.start_time) < body.end_time,
-            col(InspectionSlot.end_time) > body.start_time,
+    overlap = (
+        await session.exec(
+            select(InspectionSlot).where(
+                InspectionSlot.property_id == prop.id,
+                InspectionSlot.status != SlotStatus.CANCELLED,
+                col(InspectionSlot.start_time) < body.end_time,
+                col(InspectionSlot.end_time) > body.start_time,
+            )
         )
     ).first()
     if overlap:
@@ -89,31 +93,36 @@ def create_slot(property_id: int, body: SlotIn, user: ListerUser, session: Sessi
     )
     session.add(slot)
     try:
-        session.flush()
+        await session.flush()
     except IntegrityError:
-        session.rollback()
+        await session.rollback()
         raise Conflict("This slot overlaps an existing inspection slot for the property.")
     audit.record(
         session, actor_id=user.id, entity_type="InspectionSlot", entity_id=slot.id,  # type: ignore[arg-type]
         action="SLOT_CREATED", to_status=SlotStatus.OPEN.value,
         metadata={"property_id": prop.id, "start_time": body.start_time.isoformat()},
     )  # fmt: skip
-    session.commit()
-    session.refresh(slot)
+    await session.commit()
+    await session.refresh(slot)
     return slot
 
 
 @router.post("/api/inspection-slots/{slot_id}/cancel", response_model=SlotOut)
-def cancel_slot(slot_id: int, user: ListerUser, session: SessionDep) -> InspectionSlot:
-    slot = session.exec(select(InspectionSlot).where(InspectionSlot.id == slot_id).with_for_update()).first()
+async def cancel_slot(slot_id: int, user: ListerUser, session: SessionDep) -> InspectionSlot:
+    slot = (
+        await session.exec(select(InspectionSlot).where(InspectionSlot.id == slot_id).with_for_update())
+    ).first()
     if not slot:
         raise NotFound("Slot not found.")
-    require_manager(session, session.get(Property, slot.property_id), user)  # type: ignore[arg-type]
+    await require_manager(session, await session.get(Property, slot.property_id), user)  # type: ignore[arg-type]
     if slot.status == SlotStatus.CANCELLED:
         raise Conflict("This slot is already cancelled.")
-    active = session.exec(
-        select(InspectionBooking).where(
-            InspectionBooking.slot_id == slot.id, col(InspectionBooking.status).in_(ACTIVE_BOOKING_STATUSES)
+    active = (
+        await session.exec(
+            select(InspectionBooking).where(
+                InspectionBooking.slot_id == slot.id,
+                col(InspectionBooking.status).in_(ACTIVE_BOOKING_STATUSES),
+            )
         )
     ).first()
     if active:
@@ -125,8 +134,8 @@ def cancel_slot(slot_id: int, user: ListerUser, session: SessionDep) -> Inspecti
         session, actor_id=user.id, entity_type="InspectionSlot", entity_id=slot.id,  # type: ignore[arg-type]
         action="SLOT_CANCELLED", from_status=old, to_status=SlotStatus.CANCELLED.value,
     )  # fmt: skip
-    session.commit()
-    session.refresh(slot)
+    await session.commit()
+    await session.refresh(slot)
     return slot
 
 
@@ -134,14 +143,14 @@ def cancel_slot(slot_id: int, user: ListerUser, session: SessionDep) -> Inspecti
 
 
 @router.post("/api/inspection-bookings", response_model=BookingOut, status_code=201)
-def book_slot(body: BookingIn, user: RenterUser, session: SessionDep) -> BookingOut:
+async def book_slot(body: BookingIn, user: RenterUser, session: SessionDep) -> BookingOut:
     # Lock the slot row so two renters booking at the same moment are serialised.
-    slot = session.exec(
-        select(InspectionSlot).where(InspectionSlot.id == body.slot_id).with_for_update()
+    slot = (
+        await session.exec(select(InspectionSlot).where(InspectionSlot.id == body.slot_id).with_for_update())
     ).first()
     if not slot:
         raise NotFound("Slot not found.")
-    prop = session.get(Property, slot.property_id)
+    prop = await session.get(Property, slot.property_id)
     if not prop or not prop.is_listed:
         raise NotFound("Slot not found.")
     if slot.status != SlotStatus.OPEN:
@@ -158,24 +167,24 @@ def book_slot(body: BookingIn, user: RenterUser, session: SessionDep) -> Booking
     session.add(slot)
     session.add(booking)
     try:
-        session.flush()
+        await session.flush()
     except IntegrityError:
-        session.rollback()
+        await session.rollback()
         raise Conflict("This slot is no longer available. Please choose another time.")
     audit.record(
         session, actor_id=user.id, entity_type="InspectionBooking", entity_id=booking.id,  # type: ignore[arg-type]
         action="BOOKING_REQUESTED", to_status=BookingStatus.REQUESTED.value,
         metadata={"slot_id": slot.id, "property_id": prop.id},
     )  # fmt: skip
-    session.commit()
-    session.refresh(booking)
-    for manager_id in property_manager_ids(session, prop):
-        notify(manager_id, "BOOKING_REQUESTED", f"New inspection request for property {prop.id}")
-    return _booking_out(session, booking, user)
+    await session.commit()
+    await session.refresh(booking)
+    for manager_id in await property_manager_ids(session, prop):
+        await notify(manager_id, "BOOKING_REQUESTED", f"New inspection request for property {prop.id}")
+    return await _booking_out(session, booking, user)
 
 
 @router.get("/api/inspection-bookings", response_model=list[BookingOut])
-def list_bookings(
+async def list_bookings(
     user: CurrentUser, session: SessionDep, status: BookingStatus | None = None
 ) -> list[BookingOut]:
     """Renters see their own bookings; agents/landlords see bookings on properties they manage."""
@@ -183,76 +192,76 @@ def list_bookings(
     if user.role == Role.RENTER:
         query = query.where(InspectionBooking.renter_id == user.id)
     elif user.role in (Role.AGENT, Role.LANDLORD):
-        agent = session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id)).first()
+        agent = (await session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id))).first()
         managed = select(Property.id).where(
             or_(Property.owner_user_id == user.id, Property.listing_agent_id == (agent.id if agent else -1))
         )
         query = query.where(col(InspectionBooking.property_id).in_(managed))
     if status:
         query = query.where(InspectionBooking.status == status)
-    rows = session.exec(query.order_by(col(InspectionBooking.created_at).desc()).limit(200)).all()
-    return [_booking_out(session, b, user) for b in rows]
+    rows = (await session.exec(query.order_by(col(InspectionBooking.created_at).desc()).limit(200))).all()
+    return [await _booking_out(session, b, user) for b in rows]
 
 
-def _visible_booking(session, booking_id: int, user: User) -> InspectionBooking:
-    booking = session.get(InspectionBooking, booking_id)
+async def _visible_booking(session, booking_id: int, user: User) -> InspectionBooking:
+    booking = await session.get(InspectionBooking, booking_id)
     if not booking:
         raise NotFound("Booking not found.")
     if user.role in (Role.REVIEWER, Role.ADMIN):
         return booking
-    prop = session.get(Property, booking.property_id)
-    if booking.renter_id != user.id and user.id not in property_manager_ids(session, prop):
+    prop = await session.get(Property, booking.property_id)
+    if booking.renter_id != user.id and user.id not in await property_manager_ids(session, prop):
         raise NotFound("Booking not found.")
     return booking
 
 
 @router.get("/api/inspection-bookings/{booking_id}", response_model=BookingOut)
-def get_booking(booking_id: int, user: CurrentUser, session: SessionDep) -> BookingOut:
-    return _booking_out(session, _visible_booking(session, booking_id, user), user)
+async def get_booking(booking_id: int, user: CurrentUser, session: SessionDep) -> BookingOut:
+    return await _booking_out(session, await _visible_booking(session, booking_id, user), user)
 
 
-def _move(
+async def _move(
     session, booking_id: int, user: User, to: BookingStatus, reason: str | None, event: str
 ) -> BookingOut:
-    booking = _visible_booking(session, booking_id, user)
-    transition(session, INSPECTION_BOOKING, booking.id, to, user, reason=reason)  # type: ignore[arg-type]
-    session.commit()
-    session.refresh(booking)
-    notify(booking.renter_id, event, f"Inspection booking {booking.id} is now {booking.status.value}")
-    return _booking_out(session, booking, user)
+    booking = await _visible_booking(session, booking_id, user)
+    await transition(session, INSPECTION_BOOKING, booking.id, to, user, reason=reason)  # type: ignore[arg-type]
+    await session.commit()
+    await session.refresh(booking)
+    await notify(booking.renter_id, event, f"Inspection booking {booking.id} is now {booking.status.value}")
+    return await _booking_out(session, booking, user)
 
 
 @router.post("/api/inspection-bookings/{booking_id}/confirm", response_model=BookingOut)
-def confirm_booking(
+async def confirm_booking(
     booking_id: int, user: CurrentUser, session: SessionDep, body: ReasonIn | None = None
 ) -> BookingOut:
-    return _move(
+    return await _move(
         session, booking_id, user, BookingStatus.CONFIRMED, body.reason if body else None, "BOOKING_CONFIRMED"
     )
 
 
 @router.post("/api/inspection-bookings/{booking_id}/decline", response_model=BookingOut)
-def decline_booking(
+async def decline_booking(
     booking_id: int, body: RequiredReasonIn, user: CurrentUser, session: SessionDep
 ) -> BookingOut:
-    return _move(session, booking_id, user, BookingStatus.DECLINED, body.reason, "BOOKING_DECLINED")
+    return await _move(session, booking_id, user, BookingStatus.DECLINED, body.reason, "BOOKING_DECLINED")
 
 
 @router.post("/api/inspection-bookings/{booking_id}/complete", response_model=BookingOut)
-def complete_booking(booking_id: int, user: CurrentUser, session: SessionDep) -> BookingOut:
-    booking = _visible_booking(session, booking_id, user)
-    slot = session.get(InspectionSlot, booking.slot_id)
+async def complete_booking(booking_id: int, user: CurrentUser, session: SessionDep) -> BookingOut:
+    booking = await _visible_booking(session, booking_id, user)
+    slot = await session.get(InspectionSlot, booking.slot_id)
     if slot and slot.start_time > utcnow():
         raise Conflict("An inspection cannot be marked completed before its scheduled start time.")
-    return _move(session, booking_id, user, BookingStatus.COMPLETED, None, "BOOKING_COMPLETED")
+    return await _move(session, booking_id, user, BookingStatus.COMPLETED, None, "BOOKING_COMPLETED")
 
 
 @router.post("/api/inspection-bookings/{booking_id}/cancel", response_model=BookingOut)
-def cancel_booking(
+async def cancel_booking(
     booking_id: int, user: CurrentUser, session: SessionDep, body: ReasonIn | None = None
 ) -> BookingOut:
     if user.role in (Role.REVIEWER, Role.ADMIN):
         raise Forbidden("Reviewers do not cancel inspection bookings.")
-    return _move(
+    return await _move(
         session, booking_id, user, BookingStatus.CANCELLED, body.reason if body else None, "BOOKING_CANCELLED"
     )

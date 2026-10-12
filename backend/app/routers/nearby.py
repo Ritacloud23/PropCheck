@@ -17,7 +17,7 @@ from app.schemas.nearby import (
     PlaceReportOut,
 )
 from app.services import audit, nearby, presenters
-from app.services.ratelimit import auth_rate_limit
+from app.services.ratelimit import limit
 from app.services.state_machine import transition
 from app.services.workflows import PLACE_REPORT
 
@@ -48,8 +48,12 @@ def place_out(result: nearby.NearbyResult) -> NearbyPlaceOut:
     )
 
 
-@router.get("/api/nearby-places", response_model=NearbyResponse)
-def nearby_places(
+@router.get(
+    "/api/nearby-places",
+    response_model=NearbyResponse,
+    dependencies=[Depends(limit("nearby_search", by="ip"))],
+)
+async def nearby_places(
     session: SessionDep,
     latitude: float = Query(ge=-90, le=90),
     longitude: float = Query(ge=-180, le=180),
@@ -63,7 +67,7 @@ def nearby_places(
     limit: int = Query(default=30, ge=1, le=nearby.MAX_RESULTS),
 ) -> NearbyResponse:
     """Places within `radius_km` of a point, nearest first. Empty `items` when nothing is close."""
-    results = nearby.get_provider(session).search(
+    results = await nearby.get_provider(session).search(
         latitude=latitude, longitude=longitude, radius_km=radius_km, category=category, limit=limit
     )
     items = [place_out(r) for r in results]
@@ -77,8 +81,8 @@ def nearby_places(
     )
 
 
-def report_out(session, report: PlaceReport, viewer: User) -> PlaceReportOut:
-    place = session.get(NearbyPlace, report.nearby_place_id)
+async def report_out(session, report: PlaceReport, viewer: User) -> PlaceReportOut:
+    place = await session.get(NearbyPlace, report.nearby_place_id)
     staff = presenters.STAFF
     is_staff = viewer.role in staff
     return PlaceReportOut(
@@ -91,7 +95,7 @@ def report_out(session, report: PlaceReport, viewer: User) -> PlaceReportOut:
         reason=report.reason,
         description=report.description,
         status=report.status,
-        reporter_name=presenters.user_names(session, [report.reporter_id]).get(report.reporter_id)
+        reporter_name=(await presenters.user_names(session, [report.reporter_id])).get(report.reporter_id)
         if is_staff
         else None,
         reviewer_notes=report.reviewer_notes if is_staff else None,
@@ -105,20 +109,22 @@ def report_out(session, report: PlaceReport, viewer: User) -> PlaceReportOut:
     "/api/nearby-places/{place_id}/report",
     response_model=PlaceReportOut,
     status_code=201,
-    dependencies=[Depends(auth_rate_limit)],
+    dependencies=[Depends(limit("reports", by="user", scope="place"))],
 )
-def report_place(
+async def report_place(
     place_id: int, body: PlaceReportIn, user: CurrentUser, session: SessionDep
 ) -> PlaceReportOut:
     """Report incorrect information about a nearby place. A reviewer checks every report."""
-    place = session.get(NearbyPlace, place_id)
+    place = await session.get(NearbyPlace, place_id)
     if not place or not place.is_active:
         raise NotFound("Place not found.")
-    duplicate = session.exec(
-        select(PlaceReport).where(
-            PlaceReport.nearby_place_id == place_id,
-            PlaceReport.reporter_id == user.id,
-            PlaceReport.status == PlaceReportStatus.OPEN,
+    duplicate = (
+        await session.exec(
+            select(PlaceReport).where(
+                PlaceReport.nearby_place_id == place_id,
+                PlaceReport.reporter_id == user.id,
+                PlaceReport.status == PlaceReportStatus.OPEN,
+            )
         )
     ).first()
     if duplicate:
@@ -130,38 +136,40 @@ def report_place(
         description=(body.description or "").strip() or None,
     )
     session.add(report)
-    session.flush()
+    await session.flush()
     audit.record(
         session, actor_id=user.id, entity_type="PlaceReport", entity_id=report.id,  # type: ignore[arg-type]
         action="PLACE_REPORTED", to_status=report.status.value,
         metadata={"nearby_place_id": place_id, "reason": body.reason.value},
     )  # fmt: skip
-    session.commit()
-    session.refresh(report)
-    return report_out(session, report, user)
+    await session.commit()
+    await session.refresh(report)
+    return await report_out(session, report, user)
 
 
 # ---------------------------------------------------------------- reviewer queue
 
 
 @router.get("/api/reviewer/place-reports", response_model=list[PlaceReportOut])
-def list_place_reports(
+async def list_place_reports(
     user: StaffUser,
     session: SessionDep,
     status: PlaceReportStatus = PlaceReportStatus.OPEN,
     limit: int = Query(default=100, ge=1, le=200),
 ) -> list[PlaceReportOut]:
-    rows = session.exec(
-        select(PlaceReport)
-        .where(PlaceReport.status == status)
-        .order_by(col(PlaceReport.id).desc())
-        .limit(limit)
+    rows = (
+        await session.exec(
+            select(PlaceReport)
+            .where(PlaceReport.status == status)
+            .order_by(col(PlaceReport.id).desc())
+            .limit(limit)
+        )
     ).all()
-    return [report_out(session, r, user) for r in rows]
+    return [await report_out(session, r, user) for r in rows]
 
 
 @router.post("/api/reviewer/place-reports/{report_id}/{decision}", response_model=PlaceReportOut)
-def decide_place_report(
+async def decide_place_report(
     report_id: int,
     decision: Literal["resolve", "reject"],
     body: PlaceReportDecisionIn,
@@ -171,11 +179,13 @@ def decide_place_report(
     """Resolve (optionally hiding the place until it is corrected) or reject a report."""
     target = PlaceReportStatus.RESOLVED if decision == "resolve" else PlaceReportStatus.REJECTED
     meta = {"reviewer_notes": body.reviewer_notes} if body.reviewer_notes else {}
-    report = transition(session, PLACE_REPORT, report_id, target, user, reason=body.reason, metadata=meta)
+    report = await transition(
+        session, PLACE_REPORT, report_id, target, user, reason=body.reason, metadata=meta
+    )
     if body.deactivate_place:
         if decision != "resolve":
             raise Conflict("Only a resolved report can hide a place.")
-        place = session.get(NearbyPlace, report.nearby_place_id)
+        place = await session.get(NearbyPlace, report.nearby_place_id)
         if place and place.is_active:
             place.is_active = False
             session.add(place)
@@ -183,6 +193,6 @@ def decide_place_report(
                 session, actor_id=user.id, entity_type="NearbyPlace", entity_id=place.id,  # type: ignore[arg-type]
                 action="PLACE_DEACTIVATED", reason=f"Place report #{report.id}: {body.reason}",
             )  # fmt: skip
-    session.commit()
-    session.refresh(report)
-    return report_out(session, report, user)
+    await session.commit()
+    await session.refresh(report)
+    return await report_out(session, report, user)

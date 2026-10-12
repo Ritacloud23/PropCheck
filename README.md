@@ -4,8 +4,8 @@
 
 PropCheck is an MVP web platform for renters in **Lagos, Rivers (Port Harcourt), Enugu, Anambra and Imo**. It has two independent checks:
 
-- **Verified Agent** — a reviewer checks an agent's identity (and business registration where available).
-- **Verified Property** — a reviewer checks a specific listing: the agent's authority to let it, the location, the photos and the full fee breakdown. Every report has a reference number, an expiry date and an explicit list of what was **not** checked.
+- **Verified Agent** - a reviewer checks an agent's identity (and business registration where available).
+- **Verified Property** - a reviewer checks a specific listing: the agent's authority to let it, the location, the photos and the full fee breakdown. Every report has a reference number, an expiry date and an explicit list of what was **not** checked.
 
 Renters can search listings and agents, see **what is nearby** (markets, restaurants, churches, clubs) on every listing and at `/nearby`, book inspections, ask PropCheck to match them with a verified agent, report problems, and try a **test-mode** reservation flow (Paystack test keys or a built-in simulator; no real money, not escrow).
 
@@ -16,7 +16,7 @@ Renters can search listings and agents, see **what is nearby** (markets, restaur
 | Part | Tech |
 |---|---|
 | Frontend | Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4, React Hook Form + Zod, Leaflet/OpenStreetMap |
-| Backend | FastAPI, SQLModel/SQLAlchemy 2, Alembic, PostgreSQL 16, psycopg 3, Argon2 |
+| Backend | FastAPI (async), SQLModel/SQLAlchemy 2 AsyncSession, Alembic, PostgreSQL 16, asyncpg, Argon2 |
 | Tests | pytest (80 API tests) · Vitest + Testing Library (40 tests) · `backend/scripts/e2e_journey.py` |
 
 Design and data model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Endpoints: [docs/API.md](docs/API.md) · Hosting: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · Decisions: [LOG.md](LOG.md) · Product notes: [RESEARCH.md](RESEARCH.md)
@@ -110,7 +110,8 @@ Nearby places are fictional **demo data** seeded into PostgreSQL (`source = DEMO
 - Agent phone/email appear publicly only with consent.
 - Every status change runs through one state machine that locks the row, validates the transition and writes an audit entry in the same transaction.
 - Paystack live keys are refused at startup.
-- Known limits: the auth rate limiter is in-memory (one process). Use a shared store such as Redis before running several API replicas. Notifications only log to the console.
+- Rate limits protect login, registration, searches, house-search requests, reports, uploads and reservation/payment actions (HTTP 429 with `Retry-After`). See [docs/RATE_LIMITING.md](docs/RATE_LIMITING.md).
+- Known limits: without `REDIS_URL` the rate limiter uses an in-memory development fallback (one process). Set `REDIS_URL` before running several API replicas. Notifications only log to the console.
 
 ## Known limitations
 

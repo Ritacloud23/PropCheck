@@ -1,5 +1,7 @@
 import logging
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.db import engine
 from app.errors import AppError, app_error_handler
 from app.routers import (
     agents,
@@ -58,12 +61,19 @@ async def _validation_handler(_: Request, exc: Exception) -> JSONResponse:
     )
 
 
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    await engine.dispose()  # close pooled asyncpg connections cleanly on shutdown
+
+
 def create_app() -> FastAPI:
     _configure_logging()
     app = FastAPI(
         title="PropCheck Nigeria API",
         version="0.1.0",
         description="Verify the property and agent before you pay rent. Payments run in Paystack TEST mode only.",
+        lifespan=_lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -85,7 +95,7 @@ def create_app() -> FastAPI:
     app.mount("/media", StaticFiles(directory=storage.public_dir()), name="media")
 
     @app.get("/api/health", tags=["meta"])
-    def health() -> dict:
+    async def health() -> dict:
         return {"status": "ok"}
 
     return app

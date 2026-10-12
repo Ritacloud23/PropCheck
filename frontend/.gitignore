@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Original photos - local only (some are watermarked). Hero images stay tracked.
+/public/*
+!/public/hero.png
+!/public/hero-2.png
+!/public/hero-2-cropped.png

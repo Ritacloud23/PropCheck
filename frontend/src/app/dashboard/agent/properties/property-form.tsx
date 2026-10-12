@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 
 import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { ApiError, api, errorMessage } from "@/lib/api";
 import { formatNaira, propertyTypeLabel, stateLabel } from "@/lib/format";
 import { clean, propertySchema, type PropertyInput } from "@/lib/schemas";
 import type { PropertyDetail, ReferenceData } from "@/lib/types";
@@ -17,7 +17,7 @@ export function PropertyForm({ property, reference }: { property?: PropertyDetai
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const { register, handleSubmit, formState, control, setValue, getValues } = useForm<PropertyInput>({
+  const { register, handleSubmit, formState, control, setValue, getValues, setError: setFieldError } = useForm<PropertyInput>({
     resolver: zodResolver(propertySchema),
     defaultValues: property
       ? {
@@ -62,6 +62,12 @@ export function PropertyForm({ property, reference }: { property?: PropertyDetai
       }
     } catch (err) {
       setError(errorMessage(err));
+      // Show each server-side validation error under its own input as well.
+      if (err instanceof ApiError) {
+        for (const fe of err.fieldErrors ?? []) {
+          if (fe.field in propertySchema.shape) setFieldError(fe.field as keyof PropertyInput, { message: fe.message });
+        }
+      }
     }
   });
 
@@ -72,7 +78,7 @@ export function PropertyForm({ property, reference }: { property?: PropertyDetai
         <Field label="Title" htmlFor="title" error={e.title?.message} hint="e.g. Newly built 2-bedroom flat in Woji, Port Harcourt">
           <Input id="title" {...register("title")} />
         </Field>
-        <Field label="Description" htmlFor="desc">
+        <Field label="Description" htmlFor="desc" error={e.description?.message}>
           <Textarea id="desc" rows={4} {...register("description")} />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -171,7 +177,7 @@ export function PropertyForm({ property, reference }: { property?: PropertyDetai
             <Field label="Other fees" htmlFor="other_fees" error={e.other_fees?.message}>
               <Input id="other_fees" type="number" min={0} inputMode="numeric" {...register("other_fees")} />
             </Field>
-            <Field label="What are the other fees?" htmlFor="ofd">
+            <Field label="What are the other fees?" htmlFor="ofd" error={e.other_fees_description?.message}>
               <Input id="ofd" placeholder="e.g. Estate service charge" {...register("other_fees_description")} />
             </Field>
           </div>

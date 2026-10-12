@@ -1,6 +1,6 @@
 import "server-only";
 
-import { cookies } from "next/headers";
+import { cookies, headers as requestHeaders } from "next/headers";
 
 import type { ReferenceData, User } from "./types";
 
@@ -16,9 +16,20 @@ export class ServerApiError extends Error {
   }
 }
 
-/** Server Component fetch: talks to the API directly and forwards the visitor's session cookie. */
+/** The visitor's address chain, so the API's per-IP rate limits count visitors, not this server. */
+async function forwardedFor(): Promise<string | null> {
+  try {
+    return (await requestHeaders()).get("x-forwarded-for");
+  } catch {
+    return null; // outside a request (e.g. build time)
+  }
+}
+
+/** Server Component fetch: talks to the API directly and forwards the visitor's session cookie and IP. */
 export async function serverApi<T>(path: string, { auth = true }: { auth?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = {};
+  const visitor = await forwardedFor();
+  if (visitor) headers["X-Forwarded-For"] = visitor;
   if (auth) {
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (token) headers.Cookie = `${SESSION_COOKIE}=${token}`;

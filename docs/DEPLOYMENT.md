@@ -27,7 +27,7 @@ Put the web app and the API behind HTTPS. Because the browser only talks to the 
 
 | Variable | Service | Production value |
 |---|---|---|
-| `DATABASE_URL` | api | `postgresql+psycopg://user:pass@host:5432/db` |
+| `DATABASE_URL` | api | `postgresql+asyncpg://user:pass@host:5432/db` |
 | `JWT_SECRET` | api | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `FILE_SIGNING_SECRET` | api | Another long random string |
 | `COOKIE_SECURE` | api | `true` |
@@ -37,6 +37,8 @@ Put the web app and the API behind HTTPS. Because the browser only talks to the 
 | `STORAGE_BACKEND`, `STORAGE_DIR` | api | `local` + a volume path, or `cloudinary` + `CLOUDINARY_*` |
 | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY` | api | **Test keys only** (`sk_test_…`/`pk_test_…`). Leave empty for the simulator. Live keys are rejected at startup. |
 | `PAYSTACK_CALLBACK_URL` | api | `https://<web>/dashboard/renter/reservations` |
+| `REDIS_URL` | api | `redis://<host>:6379/0`. Required before running more than one API instance; without it rate limits are per process (development fallback). See [RATE_LIMITING.md](RATE_LIMITING.md). |
+| `TRUSTED_PROXIES` | api | The address(es) of the web server / load balancer in front of the API, so per-IP limits see the visitor's IP. |
 | `API_INTERNAL_URL` | web (build + run) | How the web server reaches the API, e.g. `http://api:8000` or the private service URL |
 
 ## Operations checklist

@@ -9,6 +9,6 @@ import logging
 log = logging.getLogger("propcheck.notifications")
 
 
-def notify(user_id: int | None, event: str, summary: str) -> None:
+async def notify(user_id: int | None, event: str, summary: str) -> None:
     # Never include document contents, passwords or payment secrets in `summary`.
     log.info("notify user=%s event=%s %s", user_id, event, summary)

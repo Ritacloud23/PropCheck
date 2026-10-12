@@ -3,7 +3,7 @@ import secrets
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import or_
 from sqlmodel import col, func, select
 
@@ -46,6 +46,7 @@ from app.schemas.properties import (
 )
 from app.services import audit, presenters, storage
 from app.services.fees import total_move_in_cost
+from app.services.ratelimit import limit
 from app.services.state_machine import transition
 from app.services.workflows import VERIFICATION_CASE
 
@@ -82,20 +83,22 @@ def _new_slug(title: str, city: str) -> str:
     return f"{_slugify(f'{title} {city}')}-{secrets.token_hex(3)}"
 
 
-def load_property(session, id_or_slug: str | int) -> Property:
+async def load_property(session, id_or_slug: str | int) -> Property:
     prop = None
     if isinstance(id_or_slug, int) or str(id_or_slug).isdigit():
-        prop = session.get(Property, int(id_or_slug))
+        prop = await session.get(Property, int(id_or_slug))
     if prop is None:
-        prop = session.exec(select(Property).where(Property.public_slug == str(id_or_slug))).first()
+        prop = (await session.exec(select(Property).where(Property.public_slug == str(id_or_slug)))).first()
     if prop is None:
         raise NotFound("Property not found.")
     return prop
 
 
-def require_manager(session, prop: Property, user: User) -> None:
+async def require_manager(session, prop: Property, user: User) -> None:
     """Owner or listing agent only. Reviewers do not edit listings."""
-    if user.role in (Role.REVIEWER, Role.ADMIN) or not presenters.can_manage_property(session, prop, user):
+    if user.role in (Role.REVIEWER, Role.ADMIN) or not await presenters.can_manage_property(
+        session, prop, user
+    ):
         raise Forbidden("You can only manage your own property listings.")
 
 
@@ -115,8 +118,8 @@ def _public_filter(query):
     )
 
 
-@router.get("", response_model=Page[PropertyCard])
-def list_properties(
+@router.get("", response_model=Page[PropertyCard], dependencies=[Depends(limit("property_search", by="ip"))])
+async def list_properties(
     session: SessionDep,
     q: str | None = Query(default=None, max_length=80),
     state: str | None = None,
@@ -185,33 +188,38 @@ def list_properties(
     elif verification == "not_verified":
         query = query.where(~is_verified)
 
-    total = session.exec(select(func.count()).select_from(query.subquery())).one()
+    total = (await session.exec(select(func.count()).select_from(query.subquery()))).one()
     order = {
         "newest": col(Property.created_at).desc(),
         "rent_asc": col(Property.rent_amount).asc(),
         "rent_desc": col(Property.rent_amount).desc(),
     }[sort]
-    rows = session.exec(
-        query.order_by(order, col(Property.id)).offset((page - 1) * page_size).limit(page_size)
+    rows = (
+        await session.exec(
+            query.order_by(order, col(Property.id)).offset((page - 1) * page_size).limit(page_size)
+        )
     ).all()
     return Page(
-        items=presenters.property_cards(session, list(rows)), total=total, page=page, page_size=page_size
+        items=await presenters.property_cards(session, list(rows)),
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
 @router.get("/mine", response_model=list[PropertyCard])
-def my_properties(user: ListerUser, session: SessionDep) -> list[PropertyCard]:
-    agent = session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id)).first()
+async def my_properties(user: ListerUser, session: SessionDep) -> list[PropertyCard]:
+    agent = (await session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id))).first()
     cond = Property.owner_user_id == user.id
     if agent:
         cond = or_(cond, Property.listing_agent_id == agent.id)
-    props = session.exec(select(Property).where(cond).order_by(col(Property.created_at).desc())).all()
-    return presenters.property_cards(session, list(props))
+    props = (await session.exec(select(Property).where(cond).order_by(col(Property.created_at).desc()))).all()
+    return await presenters.property_cards(session, list(props))
 
 
 @router.post("", response_model=PropertyDetail, status_code=201)
-def create_property(body: PropertyCreate, user: ListerUser, session: SessionDep) -> PropertyDetail:
-    agent = session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id)).first()
+async def create_property(body: PropertyCreate, user: ListerUser, session: SessionDep) -> PropertyDetail:
+    agent = (await session.exec(select(AgentProfile).where(AgentProfile.user_id == user.id))).first()
     if user.role == Role.AGENT:
         if agent is None:
             raise BadRequest("Create your agent profile before listing a property.")
@@ -219,7 +227,7 @@ def create_property(body: PropertyCreate, user: ListerUser, session: SessionDep)
     else:
         listing_agent_id = body.listing_agent_id or (agent.id if agent else None)
         if listing_agent_id:
-            nominated = session.get(AgentProfile, listing_agent_id)
+            nominated = await session.get(AgentProfile, listing_agent_id)
             if nominated is None or nominated.verification_status == AgentVerificationStatus.SUSPENDED:
                 raise BadRequest("The nominated listing agent does not exist or is suspended.")
     if agent and agent.verification_status == AgentVerificationStatus.SUSPENDED:
@@ -236,30 +244,30 @@ def create_property(body: PropertyCreate, user: ListerUser, session: SessionDep)
         ),
     )
     session.add(prop)
-    session.flush()
+    await session.flush()
     audit.record(
         session, actor_id=user.id, entity_type="Property", entity_id=prop.id, action="PROPERTY_CREATED",
         metadata={"state": prop.state, "city": prop.city, "total_move_in_cost": prop.total_move_in_cost},
     )  # fmt: skip
-    session.commit()
-    session.refresh(prop)
-    return presenters.property_detail(session, prop, user)
+    await session.commit()
+    await session.refresh(prop)
+    return await presenters.property_detail(session, prop, user)
 
 
 @router.get("/{id_or_slug}", response_model=PropertyDetail)
-def get_property(id_or_slug: str, session: SessionDep, viewer: OptionalUser) -> PropertyDetail:
-    prop = load_property(session, id_or_slug)
-    if not prop.is_listed and not presenters.can_manage_property(session, prop, viewer):
+async def get_property(id_or_slug: str, session: SessionDep, viewer: OptionalUser) -> PropertyDetail:
+    prop = await load_property(session, id_or_slug)
+    if not prop.is_listed and not await presenters.can_manage_property(session, prop, viewer):
         raise NotFound("Property not found.")
-    return presenters.property_detail(session, prop, viewer)
+    return await presenters.property_detail(session, prop, viewer)
 
 
 @router.patch("/{property_id}", response_model=PropertyDetail)
-def update_property(
+async def update_property(
     property_id: int, body: PropertyUpdate, user: ListerUser, session: SessionDep
 ) -> PropertyDetail:
-    prop = load_property(session, property_id)
-    require_manager(session, prop, user)
+    prop = await load_property(session, property_id)
+    await require_manager(session, prop, user)
     changes = body.model_dump(exclude_unset=True)
     changed_material = sorted(
         k for k, v in changes.items() if k in MATERIAL_FIELDS and v is not None and getattr(prop, k) != v
@@ -277,20 +285,25 @@ def update_property(
         metadata={"fields": sorted(changes.keys())},
     )  # fmt: skip
     if changed_material and prop.verification_status == PropertyVerificationState.VERIFIED:
-        case = presenters.latest_case(session, prop.id)  # type: ignore[arg-type]
+        case = await presenters.latest_case(session, prop.id)  # type: ignore[arg-type]
         if case and case.status == VerificationStatus.VERIFIED:
             # System action: the verified facts no longer match the listing.
-            transition(
+            await transition(
                 session, VERIFICATION_CASE, case.id, VerificationStatus.EXPIRED, None,  # type: ignore[arg-type]
                 reason="Listing details changed after verification: " + ", ".join(changed_material),
                 metadata={"triggered_by_user_id": user.id},
             )  # fmt: skip
-    session.commit()
-    session.refresh(prop)
-    return presenters.property_detail(session, prop, user)
+    await session.commit()
+    await session.refresh(prop)
+    return await presenters.property_detail(session, prop, user)
 
 
-@router.post("/{property_id}/media", response_model=MediaOut, status_code=201)
+@router.post(
+    "/{property_id}/media",
+    response_model=MediaOut,
+    status_code=201,
+    dependencies=[Depends(limit("uploads", by="user"))],
+)
 async def upload_media(
     property_id: int,
     user: ListerUser,
@@ -298,26 +311,31 @@ async def upload_media(
     file: Annotated[UploadFile, File(description="JPG, PNG or WEBP, max 5 MB")],
     caption: Annotated[str | None, Form(max_length=200)] = None,
 ) -> PropertyMedia:
-    prop = load_property(session, property_id)
-    require_manager(session, prop, user)
-    count = session.exec(select(func.count()).where(PropertyMedia.property_id == prop.id)).one()
+    prop = await load_property(session, property_id)
+    await require_manager(session, prop, user)
+    count = (await session.exec(select(func.count()).where(PropertyMedia.property_id == prop.id))).one()
     if count >= MAX_PHOTOS:
         raise Conflict(f"A property can have at most {MAX_PHOTOS} photos.")
     validated = await storage.read_validated(file, kind="image")
     media = PropertyMedia(
-        property_id=prop.id, url=storage.save_public(validated, "properties"), caption=caption
+        property_id=prop.id, url=await storage.save_public(validated, "properties"), caption=caption
     )  # type: ignore[arg-type]
     session.add(media)
-    session.flush()
+    await session.flush()
     audit.record(
         session, actor_id=user.id, entity_type="Property", entity_id=prop.id, action="PHOTO_UPLOADED"
     )  # type: ignore[arg-type]
-    session.commit()
-    session.refresh(media)
+    await session.commit()
+    await session.refresh(media)
     return media
 
 
-@router.post("/{property_id}/documents", response_model=DocumentOut, status_code=201)
+@router.post(
+    "/{property_id}/documents",
+    response_model=DocumentOut,
+    status_code=201,
+    dependencies=[Depends(limit("uploads", by="user"))],
+)
 async def upload_document(
     property_id: int,
     user: ListerUser,
@@ -326,41 +344,43 @@ async def upload_document(
     document_type: Annotated[DocumentType, Form()],
 ) -> DocumentOut:
     """Supporting documents are stored privately and start as UPLOADED (not reviewed, not trusted)."""
-    prop = load_property(session, property_id)
-    require_manager(session, prop, user)
+    prop = await load_property(session, property_id)
+    await require_manager(session, prop, user)
     validated = await storage.read_validated(file, kind="document")
     doc = PropertyDocument(
         property_id=prop.id,  # type: ignore[arg-type]
         document_type=document_type,
-        url=storage.save_private(validated, "property-docs"),
+        url=await storage.save_private(validated, "property-docs"),
         original_filename=(validated.original_filename or "")[:255] or None,
         uploaded_by=user.id,  # type: ignore[arg-type]
         review_status=DocumentReviewStatus.UPLOADED,
     )
     session.add(doc)
-    session.flush()
+    await session.flush()
     audit.record(
         session, actor_id=user.id, entity_type="PropertyDocument", entity_id=doc.id,  # type: ignore[arg-type]
         action="DOCUMENT_UPLOADED", to_status="UPLOADED", metadata={"document_type": document_type.value},
     )  # fmt: skip
-    session.commit()
-    session.refresh(doc)
+    await session.commit()
+    await session.refresh(doc)
     return presenters.document_out(doc)
 
 
 @router.get("/{id_or_slug}/verification-report", response_model=VerificationReport)
-def verification_report(id_or_slug: str, session: SessionDep) -> VerificationReport:
+async def verification_report(id_or_slug: str, session: SessionDep) -> VerificationReport:
     """Public, transparent report of exactly what was (and was not) checked."""
-    prop = load_property(session, id_or_slug)
-    case = presenters.latest_case(session, prop.id, exclude_draft=True)  # type: ignore[arg-type]
+    prop = await load_property(session, id_or_slug)
+    case = await presenters.latest_case(session, prop.id, exclude_draft=True)  # type: ignore[arg-type]
     status = presenters.effective_property_status(prop)
     current = status == PropertyVerificationState.VERIFIED
 
     checks: list[CheckReportItem] = []
     timeline: list[TimelineEntry] = []
     if case:
-        rows = session.exec(
-            select(VerificationCheck).where(VerificationCheck.verification_case_id == case.id)
+        rows = (
+            await session.exec(
+                select(VerificationCheck).where(VerificationCheck.verification_case_id == case.id)
+            )
         ).all()
         by_type = {c.check_type: c for c in rows}
         for ct in CheckType:
@@ -376,10 +396,12 @@ def verification_report(id_or_slug: str, session: SessionDep) -> VerificationRep
             )
         timeline = [
             TimelineEntry(action=a.action, from_status=a.from_status, to_status=a.to_status, at=a.created_at)
-            for a in session.exec(
-                select(AuditLog)
-                .where(AuditLog.entity_type == "VerificationCase", AuditLog.entity_id == case.id)
-                .order_by(col(AuditLog.id))
+            for a in (
+                await session.exec(
+                    select(AuditLog)
+                    .where(AuditLog.entity_type == "VerificationCase", AuditLog.entity_id == case.id)
+                    .order_by(col(AuditLog.id))
+                )
             ).all()
         ]
 
@@ -389,11 +411,11 @@ def verification_report(id_or_slug: str, session: SessionDep) -> VerificationRep
         for c in checks
         if c.result != CheckResult.PASSED
     ]
-    docs = session.exec(select(PropertyDocument).where(PropertyDocument.property_id == prop.id)).all()
+    docs = (await session.exec(select(PropertyDocument).where(PropertyDocument.property_id == prop.id))).all()
 
     agent_verified = False
     if prop.listing_agent_id:
-        agent = session.get(AgentProfile, prop.listing_agent_id)
+        agent = await session.get(AgentProfile, prop.listing_agent_id)
         agent_verified = bool(
             agent and presenters.effective_agent_status(agent) == AgentVerificationStatus.VERIFIED
         )
@@ -434,8 +456,8 @@ def verification_report(id_or_slug: str, session: SessionDep) -> VerificationRep
 
 
 @router.get("/{id_or_slug}/share", response_model=ShareOut)
-def share_property(id_or_slug: str, session: SessionDep) -> ShareOut:
-    prop = load_property(session, id_or_slug)
+async def share_property(id_or_slug: str, session: SessionDep) -> ShareOut:
+    prop = await load_property(session, id_or_slug)
     url = presenters.share_url(prop)
     text = f"Check out this property on PropCheck Nigeria: {prop.title} ({prop.city}, {prop.state}) {url}"
     return ShareOut(

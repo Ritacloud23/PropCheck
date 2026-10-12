@@ -4,6 +4,7 @@ import hmac
 import time
 from datetime import timedelta
 
+import anyio
 import jwt
 from pwdlib import PasswordHash
 
@@ -13,15 +14,22 @@ from app.models.base import utcnow
 _hasher = PasswordHash.recommended()  # Argon2id
 
 
-def hash_password(password: str) -> str:
-    return _hasher.hash(password)
+# Argon2 is deliberately slow (CPU-bound), so it runs in a worker thread, off the event loop.
 
 
-def verify_password(password: str, password_hash: str) -> bool:
+async def hash_password(password: str) -> str:
+    return await anyio.to_thread.run_sync(_hasher.hash, password)
+
+
+def _verify(password: str, password_hash: str) -> bool:
     try:
         return _hasher.verify(password, password_hash)
     except Exception:
         return False
+
+
+async def verify_password(password: str, password_hash: str) -> bool:
+    return await anyio.to_thread.run_sync(_verify, password, password_hash)
 
 
 def create_access_token(user_id: int, role: str) -> str:

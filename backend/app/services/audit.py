@@ -1,6 +1,6 @@
 from typing import Any
 
-from sqlmodel import Session
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models import AuditLog
 
@@ -22,7 +22,7 @@ def _scrub(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def record(
-    session: Session,
+    session: AsyncSession,
     *,
     actor_id: int | None,
     entity_type: str,
@@ -33,7 +33,7 @@ def record(
     reason: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> AuditLog:
-    """Add an audit row to the current transaction. The caller commits (or everything rolls back)."""
+    """Add an audit row to the current transaction (no IO). The caller commits (or everything rolls back)."""
     entry = AuditLog(
         actor_user_id=actor_id,
         entity_type=entity_type,

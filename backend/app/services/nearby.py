@@ -14,7 +14,8 @@ import math
 from dataclasses import dataclass
 from typing import Protocol
 
-from sqlmodel import Session, col, select
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models import NearbyPlace
 from app.models.enums import PlaceCategory
@@ -62,7 +63,7 @@ class NearbyResult:
 class NearbyProvider(Protocol):
     name: str
 
-    def search(
+    async def search(
         self,
         *,
         latitude: float,
@@ -76,10 +77,10 @@ class NearbyProvider(Protocol):
 class DatabaseNearbyProvider:
     name = "database"
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         self.session = session
 
-    def search(
+    async def search(
         self,
         *,
         latitude: float,
@@ -97,7 +98,7 @@ class DatabaseNearbyProvider:
         if category:
             query = query.where(NearbyPlace.category == category)
         results = []
-        for place in self.session.exec(query).all():
+        for place in (await self.session.exec(query)).all():
             d = haversine_km(latitude, longitude, place.latitude, place.longitude)
             if d <= radius_km:
                 results.append(NearbyResult(place, d))
@@ -105,6 +106,6 @@ class DatabaseNearbyProvider:
         return results[:limit]
 
 
-def get_provider(session: Session) -> NearbyProvider:
+def get_provider(session: AsyncSession) -> NearbyProvider:
     # TODO: add an OverpassNearbyProvider (OpenStreetMap) behind a setting, keeping this as fallback.
     return DatabaseNearbyProvider(session)
