@@ -4,8 +4,21 @@ import { cookies, headers as requestHeaders } from "next/headers";
 
 import type { ReferenceData, User } from "./types";
 
-const API = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
+// No trailing slash, so `${API}/api/...` never becomes `//api/...`.
+const API = (process.env.API_INTERNAL_URL ?? "http://localhost:8000").replace(/\/+$/, "");
 export const SESSION_COOKIE = "propcheck_session";
+
+/** fetch() that says which API address failed: a bare "fetch failed / ECONNREFUSED" hides it. */
+async function apiFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    const reason = (e as { cause?: { code?: string } }).cause?.code ?? String(e);
+    throw new Error(`Could not reach the PropCheck API at ${API} (${reason}). Is API_INTERNAL_URL set?`, {
+      cause: e,
+    });
+  }
+}
 
 export class ServerApiError extends Error {
   constructor(
@@ -34,7 +47,7 @@ export async function serverApi<T>(path: string, { auth = true }: { auth?: boole
     const token = (await cookies()).get(SESSION_COOKIE)?.value;
     if (token) headers.Cookie = `${SESSION_COOKIE}=${token}`;
   }
-  const res = await fetch(`${API}${path}`, { headers, cache: "no-store" });
+  const res = await apiFetch(`${API}${path}`, { headers, cache: "no-store" });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new ServerApiError(res.status, data.detail ?? `API error ${res.status}`);
@@ -65,7 +78,7 @@ export async function getCurrentUser(): Promise<User | null> {
 
 /** Static lookup data (states, cities, enums). Cached for an hour. */
 export async function getReference(): Promise<ReferenceData> {
-  const res = await fetch(`${API}/api/reference`, { next: { revalidate: 3600 } });
+  const res = await apiFetch(`${API}/api/reference`, { next: { revalidate: 3600 } });
   if (!res.ok) throw new ServerApiError(res.status, "Could not load reference data");
   return res.json();
 }

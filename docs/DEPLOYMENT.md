@@ -41,6 +41,11 @@ Put the web app and the API behind HTTPS. Because the browser only talks to the 
 | `TRUSTED_PROXIES` | api | The address(es) of the web server / load balancer in front of the API, so per-IP limits see the visitor's IP. |
 | `API_INTERNAL_URL` | web (build + run) | How the web server reaches the API, e.g. `http://api:8000` or the private service URL |
 
+## Render notes
+
+- **Web service:** set `API_INTERNAL_URL` to the API's URL, e.g. `https://propcheck-1.onrender.com`, with no trailing slash and no `/api`. It is read at build time (rewrites) and at runtime (server-rendered pages), so after changing it use **Manual Deploy → Clear build cache & deploy**. If it is missing, the web server falls back to `http://localhost:8000` and pages fail with `TypeError: fetch failed` / `ECONNREFUSED`. There is no `NEXT_PUBLIC_` API variable on purpose: the browser only calls the web origin, which keeps the session cookie first-party.
+- **API service:** set `DATABASE_URL` to the Render Postgres **internal** URL (any `postgres://` URL is converted to `postgresql+asyncpg://` automatically). Keep the Docker start command so `alembic upgrade head` runs before uvicorn. If `/api/health` and `/api/reference` answer but login or `/api/properties` return 500, the API cannot reach its database or the migrations have not run.
+
 ## Operations checklist
 
 - Back up Postgres and the private storage volume together (documents are referenced by key from the DB).

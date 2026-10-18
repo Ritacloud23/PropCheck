@@ -138,5 +138,5 @@ Transitions: `DRAFT→SUBMITTED→IN_REVIEW→(INSPECTION_BOOKED→)VERIFIED|REJ
 | GET | `/reports/mine` | Reports I filed |
 | GET | `/files/{token}` | Private file download. Tokens are HMAC-signed and expire after 10 minutes. |
 | GET | `/reference` | Active states (Lagos, Rivers, Enugu, Anambra, Imo), `locations` hierarchy (state → cities, major first → areas with LGA and coordinates), enums, notices |
-| GET | `/health` | Liveness |
+| GET | `/health` | Liveness, `{status: "ok"}`. Also served outside `/api` at `/health`, and the bare API root `/` returns `{service: "PropCheck API", status: "ok"}`. |
 | GET | `/media/...` | Public photos (not under `/api`) |

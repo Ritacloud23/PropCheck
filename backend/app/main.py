@@ -91,9 +91,13 @@ def create_app() -> FastAPI:
     ):  # fmt: skip
         app.include_router(module.router)
 
-    # Public photos only. Private documents live in a different directory and are never mounted.
     app.mount("/media", StaticFiles(directory=storage.public_dir()), name="media")
 
+    @app.get("/", tags=["meta"])
+    async def root() -> dict:
+        return {"service": "PropCheck API", "status": "ok"}
+
+    @app.get("/health", tags=["meta"])
     @app.get("/api/health", tags=["meta"])
     async def health() -> dict:
         return {"status": "ok"}

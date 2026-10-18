@@ -2,7 +2,11 @@ import type { NextConfig } from "next";
 
 // The browser talks to the API through this same origin (/api, /media), so the httpOnly
 // session cookie stays first-party and no CORS preflights are needed.
-const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
+// The rewrites are compiled at build time, so API_INTERNAL_URL must be set when building, not only at runtime.
+const apiUrl = (process.env.API_INTERNAL_URL ?? "http://localhost:8000").replace(/\/+$/, "");
+if (!process.env.API_INTERNAL_URL && process.env.NODE_ENV === "production") {
+  console.warn(`API_INTERNAL_URL is not set: /api and /media will be proxied to ${apiUrl}.`);
+}
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
