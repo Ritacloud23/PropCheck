@@ -1,14 +1,14 @@
 import Link from "next/link";
 
 import { DISCLAIMER } from "./disclaimer";
-import { Logo } from "./site-header";
+import { HeaderBrand } from "./site-header";
 
 export function SiteFooter() {
   return (
     <footer className="mt-16 border-t border-slate-200 bg-white">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
-          <Logo />
+          <HeaderBrand />
           <p className="mt-3 max-w-md text-sm text-slate-600">Verify the property and agent before you pay rent.</p>
           <p className="mt-4 max-w-xl text-xs leading-relaxed text-slate-500">{DISCLAIMER}</p>
         </div>

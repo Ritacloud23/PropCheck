@@ -10,6 +10,8 @@ import { PropertyCard } from "@/components/property-card";
 import { getReference, serverApi } from "@/lib/server-api";
 import type { Page, PropertyCard as PropertyCardT } from "@/lib/types";
 
+import { HeroCarousel } from "./hero-carousel";
+import { HERO_IMAGES } from "./hero-images";
 import { HeroSearch } from "./hero-search";
 
 async function featured(): Promise<PropertyCardT[]> {
@@ -90,9 +92,12 @@ function HeroPropertyCard() {
   );
 }
 
-// Hero background photo in public/. If the file is missing, the hero falls back to plain dark green.
-const HERO_PHOTO = "/hero.png";
-const hasHeroPhoto = existsSync(path.join(process.cwd(), "public", HERO_PHOTO));
+// Hero carousel photos that exist in public/. Missing files are dropped; with none, the hero is plain dark green.
+const heroImages = HERO_IMAGES.filter((image) => {
+  const found = existsSync(path.join(process.cwd(), "public", image.src));
+  if (!found && process.env.NODE_ENV === "development") console.warn(`Hero image not found in public/: ${image.src}`);
+  return found;
+});
 // Property photo shown inside the floating hero card (1024×455, cropped from hero-2.png to drop its baked-in badge and heart).
 const HERO_CARD_PHOTO = "/hero-2-cropped.png";
 
@@ -102,21 +107,15 @@ export default async function HomePage() {
     <>
       <section className="px-4 pt-4 sm:px-6 lg:pt-6">
         <div className="mx-auto max-w-7xl">
-          <div className="relative overflow-hidden rounded-[2rem] bg-brand-900">
-            {hasHeroPhoto && (
-              <Image
-                src={HERO_PHOTO}
-                alt="Bright open-plan living room with a grey sofa, opening onto a kitchen and balcony"
-                fill
-                preload
-                sizes="(min-width: 1280px) 1248px, 100vw"
-                className="object-cover"
-              />
-            )}
+          <HeroCarousel
+            images={heroImages}
+            sizes="(min-width: 1280px) 1248px, 100vw"
+            className="relative overflow-hidden rounded-none bg-brand-900"
+          >
             <div aria-hidden className="absolute inset-0 bg-brand-900/80 opacity-70 lg:bg-transparent lg:hero-scrim" />
             <div className="relative grid gap-10 px-5 pb-28 pt-10 sm:px-10 sm:pt-14 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-center lg:gap-12 lg:px-14 lg:pb-32 lg:pt-16 xl:grid-cols-[minmax(0,1fr)_320px]">
               <div className="flex max-w-xl flex-col items-start">
-                <p className="inline-flex items-center gap-2 rounded-full bg-forest/75 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur-sm sm:text-sm">
+                <p className="inline-flex items-center gap-2 rounded-full bg-[#808080]/75 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/25 backdrop-blur-sm sm:text-sm">
                   <span className="size-2 shrink-0 rounded-full bg-highlight" aria-hidden />
                   Serving Lagos, Enugu, Anambra, Imo and Rivers
                 </p>
@@ -146,7 +145,7 @@ export default async function HomePage() {
                 <HeroPropertyCard />
               </div>
             </div>
-          </div>
+          </HeroCarousel>
           <div className="relative z-10 -mt-20 sm:mx-4 lg:mx-8">
             <HeroSearch reference={reference} />
           </div>

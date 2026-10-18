@@ -1,4 +1,5 @@
 import { ShieldCheck } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 import { dashboardHome } from "@/lib/guards";
@@ -30,12 +31,21 @@ export function Logo() {
   );
 }
 
+// Header and footer brand: the location-pin mark only. Auth pages keep the full Logo lockup.
+export function HeaderBrand() {
+  return (
+    <Link href="/" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-forest">
+      <Image src="/images/branding/propcheck-pin-apartment.png" alt="PropCheck" width={28} height={28} className="size-7 object-contain" />
+    </Link>
+  );
+}
+
 export async function SiteHeader() {
   const user = await getCurrentUser();
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-        <Logo />
+        <HeaderBrand />
         <nav className="hidden items-center gap-1 lg:flex" aria-label="Main">
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
