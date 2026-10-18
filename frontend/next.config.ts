@@ -5,6 +5,10 @@ import type { NextConfig } from "next";
 // The rewrites are compiled at build time, so API_INTERNAL_URL must be set when building, not only at runtime.
 const apiUrl = (process.env.API_INTERNAL_URL ?? "http://localhost:8000").replace(/\/+$/, "");
 if (!process.env.API_INTERNAL_URL && process.env.NODE_ENV === "production") {
+  // On Render (which sets RENDER=true) a localhost fallback can never work, so stop the deploy here.
+  if (process.env.RENDER) {
+    throw new Error("API_INTERNAL_URL is not set. Add it to this Render service's environment, e.g. https://<api>.onrender.com");
+  }
   console.warn(`API_INTERNAL_URL is not set: /api and /media will be proxied to ${apiUrl}.`);
 }
 

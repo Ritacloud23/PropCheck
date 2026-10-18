@@ -1,12 +1,3 @@
-"""End-to-end journey against a RUNNING stack (API + seeded database).
-
-    python scripts/e2e_journey.py [--api http://localhost:8000]
-
-Registers a fresh agent and renter, uses the seeded reviewer (reviewer@propcheck.ng) and walks:
-agent verification -> listing -> property verification -> search -> inspection booking ->
-test reservation -> payment -> keys confirmed -> duplicate release refused.
-"""
-
 import argparse
 import secrets
 import sys

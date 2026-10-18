@@ -14,7 +14,9 @@ RUN npm run build
 
 FROM node:24-alpine AS run
 WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+# Server-rendered pages read API_INTERNAL_URL at runtime too: keep the build's value as the default.
+ARG API_INTERNAL_URL=http://api:8000
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 API_INTERNAL_URL=$API_INTERNAL_URL
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
