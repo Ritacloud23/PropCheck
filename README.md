@@ -1,5 +1,7 @@
 # PropCheck Nigeria
 
+[![CI](https://github.com/Ritacloud23/PropCheck/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Ritacloud23/PropCheck/actions/workflows/ci.yml)
+
 > **Verify the property and agent before you pay rent.**
 
 PropCheck is an MVP web platform for renters in **Lagos, Rivers (Port Harcourt), Enugu, Anambra and Imo**. It has two independent checks:
@@ -17,9 +19,9 @@ Renters can search listings and agents, see **what is nearby** (markets, restaur
 |---|---|
 | Frontend | Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4, React Hook Form + Zod, Leaflet/OpenStreetMap |
 | Backend | FastAPI (async), SQLModel/SQLAlchemy 2 AsyncSession, Alembic, PostgreSQL 16, asyncpg, Argon2 |
-| Tests | pytest (80 API tests) · Vitest + Testing Library (40 tests) · `backend/scripts/e2e_journey.py` |
+| Tests | pytest (110 API tests) · Vitest + Testing Library (53 tests) · `backend/scripts/e2e_journey.py` |
 
-Design and data model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Endpoints: [docs/API.md](docs/API.md) · Hosting: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · Decisions: [LOG.md](LOG.md) · Product notes: [RESEARCH.md](RESEARCH.md)
+Design and data model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Endpoints: [docs/API.md](docs/API.md) · Hosting: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · CI: [docs/CI.md](docs/CI.md) · Decisions: [LOG.md](LOG.md) · Product notes: [RESEARCH.md](RESEARCH.md)
 
 ## Quick start (Docker)
 
@@ -86,6 +88,8 @@ npm run typecheck && npm run lint && npm run build
 ```
 
 The backend tests migrate `propcheck_test` with Alembic once per run and wrap every test in a rolled-back transaction.
+
+GitHub Actions runs these checks, plus `alembic upgrade head` and `alembic check` on a throwaway Postgres, on every push and pull request to `main`. The workflow only runs checks and never deploys. See [docs/CI.md](docs/CI.md) for the full list, how to read failed runs and how to handle CI variables.
 
 ## What is in the MVP
 

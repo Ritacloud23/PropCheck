@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+
+permissions:
+  contents: read
+
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (lint, types, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+     
+      API_INTERNAL_URL: http://localhost:8000
+      FRONTEND_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npm run typecheck
+
+      - name: Tests (Vitest)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  backend:
+    name: Backend (format, lint, migrations, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: propcheck_ci
+          POSTGRES_PASSWORD: propcheck_ci
+          POSTGRES_DB: propcheck_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U propcheck_ci -d propcheck_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://propcheck_ci:propcheck_ci@localhost:5432/propcheck_ci
+      TEST_DATABASE_URL: postgresql+asyncpg://propcheck_ci:propcheck_ci@localhost:5432/propcheck_ci_test
+      JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-else
+      FILE_SIGNING_SECRET: ci-only-file-signing-secret
+      STORAGE_BACKEND: local
+      PAYSTACK_SECRET_KEY: ""
+      PAYSTACK_PUBLIC_KEY: ""
+      CLOUDINARY_CLOUD_NAME: ""
+      CLOUDINARY_API_KEY: ""
+      CLOUDINARY_API_SECRET: ""
+      REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.x"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      
+      - name: mypy (informational)
+        continue-on-error: true
+        run: uv run mypy app
+
+      - name: Create the test database
+        env:
+          PGPASSWORD: propcheck_ci
+        run: psql -h localhost -U propcheck_ci -d propcheck_ci -c "CREATE DATABASE propcheck_ci_test"
+
+      - name: Apply migrations to the CI database
+        run: uv run alembic upgrade head
+
+      - name: Check models match migrations
+        run: uv run alembic check
+
+      - name: Tests (pytest)
+        run: uv run pytest
