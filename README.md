@@ -4,6 +4,8 @@
 
 > **Verify the property and agent before you pay rent.**
 
+**Live demo:** https://propcheck-web-5hn3.onrender.com (free hosting, so the first visit after a quiet spell takes about a minute). Log in with any [demo account](#demo-accounts).
+
 PropCheck is an MVP web platform for renters in **Lagos, Rivers (Port Harcourt), Enugu, Anambra and Imo**. It has two independent checks:
 
 - **Verified Agent** - a reviewer checks an agent's identity (and business registration where available).
@@ -19,7 +21,7 @@ Renters can search listings and agents, see **what is nearby** (markets, restaur
 |---|---|
 | Frontend | Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4, React Hook Form + Zod, Leaflet/OpenStreetMap |
 | Backend | FastAPI (async), SQLModel/SQLAlchemy 2 AsyncSession, Alembic, PostgreSQL 16, asyncpg, Argon2 |
-| Tests | pytest (110 API tests) · Vitest + Testing Library (53 tests) · `backend/scripts/e2e_journey.py` |
+| Tests | pytest (113 API tests) · Vitest + Testing Library (53 tests) · `backend/scripts/e2e_journey.py` |
 
 Design and data model: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Endpoints: [docs/API.md](docs/API.md) · Hosting: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · CI: [docs/CI.md](docs/CI.md) · Decisions: [LOG.md](LOG.md) · Product notes: [RESEARCH.md](RESEARCH.md)
 
@@ -91,6 +93,15 @@ The backend tests migrate `propcheck_test` with Alembic once per run and wrap ev
 
 GitHub Actions runs these checks, plus `alembic upgrade head` and `alembic check` on a throwaway Postgres, on every push and pull request to `main`. The workflow only runs checks and never deploys. See [docs/CI.md](docs/CI.md) for the full list, how to read failed runs and how to handle CI variables.
 
+## Deployment (Render)
+
+`render.yaml` is a Render Blueprint that creates the whole stack: Postgres, Key Value (Redis, for rate limits), the API and the web app. In Render, choose **New → Blueprint**, pick this repo, and enter the public URLs it asks for. The API runs migrations on every start and, with `SEED_DEMO_DATA=true` (the default), loads the demo data. The full guide, including what each setting is for and the free plan's limits, is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The problems hit during the first deploy are in [LOG.md](LOG.md#deployment-on-render-2026-10-19).
+
+Two rules for the frontend:
+
+- `frontend/public/` is git-ignored except for listed files. A new image needs an exception in `frontend/.gitignore`, or it won't exist on the deployed site.
+- The landing hero serves pre-sized copies from `public/hero/`. After changing a hero photo, run `node scripts/optimize-hero-images.mjs` in `frontend/` and commit the result.
+
 ## What is in the MVP
 
 - Public: home, property search with filters (state, city, area, type, bedrooms, rent, verification status), property page with fee breakdown, verification report, "What is nearby?" map and list, inspection booking, share links; `/nearby` search by state/city/area or your location; agent directory and profiles; "help me find a house" requests; report a problem; how it works, pricing, about.
@@ -124,7 +135,8 @@ Nearby places are fictional **demo data** seeded into PostgreSQL (`source = DEMO
 - **Reviewer work is manual**: agent matching, inspections and document review. Automatic matching is on the roadmap.
 - **Notifications** (email/SMS) are an interface that only logs to the console.
 - **Ratings and reviews** are seeded figures. Renters cannot submit reviews yet.
-- **Rate limiting** is in-memory and works for a single API process only.
+- **Rate limiting** shares its counters through Redis on Render. Without `REDIS_URL` (local development) it is in-memory and works for a single API process only.
+- **The live demo runs on Render's free plan.** Services sleep when idle, and files uploaded there are lost on every restart. Demo photos are restored on start, but nothing else is. Real use needs a paid plan with a persistent disk or Cloudinary storage.
 - **Coverage** is limited to Lagos, Rivers, Enugu, Anambra and Imo. FCT and northern states are deliberately out of the first release.
 - **Nearby places** are fictional demo data and are not verified.
 
