@@ -3,8 +3,10 @@ import type { NextConfig } from "next";
 // The browser talks to the API through this same origin (/api, /media), so the httpOnly
 // session cookie stays first-party and no CORS preflights are needed.
 // The rewrites are compiled at build time, so API_INTERNAL_URL must be set when building, not only at runtime.
-const apiUrl = (process.env.API_INTERNAL_URL ?? "http://localhost:8000").replace(/\/+$/, "");
-if (!process.env.API_INTERNAL_URL && process.env.NODE_ENV === "production") {
+// Trimmed: a value pasted into a dashboard with a stray space would otherwise make every rewrite invalid.
+const configuredApiUrl = process.env.API_INTERNAL_URL?.trim();
+const apiUrl = (configuredApiUrl || "http://localhost:8000").replace(/\/+$/, "");
+if (!configuredApiUrl && process.env.NODE_ENV === "production") {
   // On Render (which sets RENDER=true) a localhost fallback can never work, so stop the deploy here.
   if (process.env.RENDER) {
     throw new Error("API_INTERNAL_URL is not set. Add it to this Render service's environment, e.g. https://<api>.onrender.com");

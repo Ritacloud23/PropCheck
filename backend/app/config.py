@@ -5,7 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
+    # str_strip_whitespace: values pasted into a hosting dashboard often carry a stray space.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore", str_strip_whitespace=True)
 
     database_url: str = "postgresql+asyncpg://propcheck:propcheck@localhost:5434/propcheck"
     test_database_url: str = "postgresql+asyncpg://propcheck:propcheck@localhost:5434/propcheck_test"

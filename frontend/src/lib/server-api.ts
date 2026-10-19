@@ -5,7 +5,7 @@ import { cookies, headers as requestHeaders } from "next/headers";
 import type { ReferenceData, User } from "./types";
 
 // No trailing slash, so `${API}/api/...` never becomes `//api/...`.
-const API = (process.env.API_INTERNAL_URL ?? "http://localhost:8000").replace(/\/+$/, "");
+const API = (process.env.API_INTERNAL_URL?.trim() || "http://localhost:8000").replace(/\/+$/, "");
 export const SESSION_COOKIE = "propcheck_session";
 
 /** fetch() that says which API address failed: a bare "fetch failed / ECONNREFUSED" hides it. */
