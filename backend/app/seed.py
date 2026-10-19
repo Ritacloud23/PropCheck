@@ -204,6 +204,12 @@ async def _add_real_photos(session: AsyncSession, prop: Property, i: int) -> Non
         await session.flush()  # photos are ordered by id, so the first one is the cover
 
 
+def _photo_lost(url: str) -> bool:
+    """Demo photos live on the API's disk: gone after a wipe (free hosting restarts) or a changed API_PUBLIC_URL."""
+    prefix = f"{settings.api_public_url}/media/"
+    return not url.startswith(prefix) or not (storage.public_dir() / url.removeprefix(prefix)).is_file()
+
+
 async def sync_listing_photos(session: AsyncSession) -> int:
     """Give already-seeded demo listings the current REAL_PHOTOS. Returns how many listings changed.
 
@@ -221,7 +227,9 @@ async def sync_listing_photos(session: AsyncSession) -> int:
                 select(PropertyMedia).where(PropertyMedia.property_id == prop.id).order_by(PropertyMedia.id)  # type: ignore[arg-type]
             )
         ).all()
-        if [m.caption for m in media] == [caption for _, caption in photos]:
+        if [m.caption for m in media] == [caption for _, caption in photos] and not any(
+            _photo_lost(m.url) for m in media
+        ):
             continue
         for m in media:
             await session.delete(m)

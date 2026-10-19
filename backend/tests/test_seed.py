@@ -106,3 +106,23 @@ async def test_rerunning_seed_refreshes_demo_listing_photos(session):
         ).all()
     ]
     assert captions == [c for _, c in seed_module.REAL_PHOTOS[0]]
+
+
+async def test_rerunning_seed_restores_photo_files_lost_from_disk(session):
+    """Free hosting wipes the disk on restart; the startup seed must put the demo photos back."""
+    from app.models import PropertyMedia
+    from app.services import storage
+
+    await seed_module.seed(await _factory(session))
+    lekki = (
+        await session.exec(
+            select(Property).where(Property.public_slug == seed_module._slug(seed_module.PROPERTIES[0][1], 0))
+        )
+    ).one()
+    media = (await session.exec(select(PropertyMedia).where(PropertyMedia.property_id == lekki.id))).all()
+    lost = storage.public_dir() / media[0].url.rsplit("/media/", 1)[1]
+    lost.unlink()
+
+    assert await seed_module.sync_listing_photos(session) == 1
+    restored = (await session.exec(select(PropertyMedia).where(PropertyMedia.property_id == lekki.id))).all()
+    assert all((storage.public_dir() / m.url.rsplit("/media/", 1)[1]).is_file() for m in restored)

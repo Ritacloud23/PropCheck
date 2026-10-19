@@ -47,6 +47,8 @@ services:
         generateValue: true
       - key: COOKIE_SECURE
         value: "true"
+      - key: SEED_DEMO_DATA
+        value: "true" # demo accounts + listings on every start; set to false for real data
       - key: STORAGE_BACKEND
         value: local
       - key: STORAGE_DIR

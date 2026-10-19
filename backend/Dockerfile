@@ -12,4 +12,5 @@ RUN useradd --create-home propcheck && mkdir -p /data/storage && chown -R propch
 USER propcheck
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"]
+# SEED_DEMO_DATA=true loads the demo data on start (idempotent; restores photos lost with the disk).
+CMD ["sh", "-c", "alembic upgrade head && if [ \"$SEED_DEMO_DATA\" = true ]; then python -m app.seed || echo 'Demo seed failed; starting the API anyway.'; fi && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"]

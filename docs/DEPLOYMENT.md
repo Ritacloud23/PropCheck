@@ -52,7 +52,7 @@ Put the web app and the API behind HTTPS. Because the browser only talks to the 
 | `PAYSTACK_CALLBACK_URL` | `<web URL>/dashboard/renter/reservations` |
 | `PAYSTACK_*_KEY` | empty (simulator) or test keys |
 
-URLs are `https://<service name>.onrender.com` unless the name is taken. If Render adds a suffix, correct the values afterwards and redeploy the web app with **Clear build cache & deploy**. Seed demo data from the API's **Shell**: `python -m app.seed`.
+URLs are `https://<service name>.onrender.com` unless the name is taken. If Render adds a suffix, correct the values afterwards and redeploy the web app with **Clear build cache & deploy**. With `SEED_DEMO_DATA=true` (the Blueprint default) the API loads the demo data on every start. The seed skips what exists, and re-saves demo photos lost when the free plan wipes the disk. Set it to `false` once the site holds real data.
 
 ## Render notes
 
