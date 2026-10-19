@@ -51,14 +51,14 @@ function activeDot() {
 
 describe("HeroCarousel", () => {
   it("keeps the original hero first and the new images in order", () => {
-    expect(HERO_IMAGES.map((i) => i.src)).toEqual(["/hero.png", "/hero-03-side-show.jpg", "/hero-05.jpg"]);
+    expect(HERO_IMAGES.map((i) => i.src)).toEqual(["/hero/hero.webp", "/hero/hero-03-side-show.webp", "/hero/hero-05.webp"]);
   });
 
   it("starts on the original hero image with carousel semantics", () => {
     renderCarousel();
     const region = screen.getByRole("region", { name: "PropCheck property images" });
     expect(region).toHaveAttribute("aria-roledescription", "carousel");
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
     expect(activeDot()).toHaveAccessibleName("Show hero image 1");
     expect(screen.getByRole("heading", { name: "Find a home" })).toBeInTheDocument();
   });
@@ -70,28 +70,28 @@ describe("HeroCarousel", () => {
       act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS));
       seen.push(activeSrc());
     }
-    expect(seen).toEqual(["/hero.png", "/hero-03-side-show.jpg", "/hero-05.jpg", "/hero.png"]);
+    expect(seen).toEqual(["/hero/hero.webp", "/hero/hero-03-side-show.webp", "/hero/hero-05.webp", "/hero/hero.webp"]);
   });
 
   it("does not advance before 2 seconds", () => {
     renderCarousel();
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS - 1));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
   });
 
   it("previous, next and dots navigate and wrap", () => {
     renderCarousel();
     fireEvent.click(screen.getByRole("button", { name: "Previous hero image" }));
-    expect(activeSrc()).toBe("/hero-05.jpg");
+    expect(activeSrc()).toBe("/hero/hero-05.webp");
     fireEvent.click(screen.getByRole("button", { name: "Next hero image" }));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
     fireEvent.click(screen.getByRole("button", { name: "Show hero image 2" }));
-    expect(activeSrc()).toBe("/hero-03-side-show.jpg");
+    expect(activeSrc()).toBe("/hero/hero-03-side-show.webp");
     expect(activeDot()).toHaveAccessibleName("Show hero image 2");
     fireEvent.click(screen.getByRole("button", { name: "Show hero image 3" }));
-    expect(activeSrc()).toBe("/hero-05.jpg");
+    expect(activeSrc()).toBe("/hero/hero-05.webp");
     fireEvent.click(screen.getByRole("button", { name: "Next hero image" }));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
   });
 
   it("manual navigation restarts the autoplay timer", () => {
@@ -99,9 +99,9 @@ describe("HeroCarousel", () => {
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS - 500));
     fireEvent.click(screen.getByRole("button", { name: "Show hero image 2" }));
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS - 500));
-    expect(activeSrc()).toBe("/hero-03-side-show.jpg");
+    expect(activeSrc()).toBe("/hero/hero-03-side-show.webp");
     act(() => vi.advanceTimersByTime(500));
-    expect(activeSrc()).toBe("/hero-05.jpg");
+    expect(activeSrc()).toBe("/hero/hero-05.webp");
   });
 
   it("pauses while hovered and resumes on leave", () => {
@@ -109,10 +109,10 @@ describe("HeroCarousel", () => {
     const region = screen.getByRole("region");
     fireEvent.mouseEnter(region);
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS * 3));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
     fireEvent.mouseLeave(region);
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS));
-    expect(activeSrc()).toBe("/hero-03-side-show.jpg");
+    expect(activeSrc()).toBe("/hero/hero-03-side-show.webp");
   });
 
   it("pauses while a control has keyboard focus and resumes on blur", () => {
@@ -120,19 +120,19 @@ describe("HeroCarousel", () => {
     const next = screen.getByRole("button", { name: "Next hero image" });
     act(() => next.focus());
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS * 3));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
     act(() => next.blur());
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS));
-    expect(activeSrc()).toBe("/hero-03-side-show.jpg");
+    expect(activeSrc()).toBe("/hero/hero-03-side-show.webp");
   });
 
   it("does not autoplay with reduced motion but manual controls still work", () => {
     reducedMotion = true;
     renderCarousel();
     act(() => vi.advanceTimersByTime(HERO_AUTOPLAY_MS * 3));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
     fireEvent.click(screen.getByRole("button", { name: "Next hero image" }));
-    expect(activeSrc()).toBe("/hero-03-side-show.jpg");
+    expect(activeSrc()).toBe("/hero/hero-03-side-show.webp");
   });
 
   it("drops an image that fails to load instead of showing it broken", () => {
@@ -142,13 +142,13 @@ describe("HeroCarousel", () => {
     expect(screen.queryByAltText(HERO_IMAGES[1].alt)).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Show hero image/ })).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Next hero image" }));
-    expect(activeSrc()).toBe("/hero-05.jpg");
+    expect(activeSrc()).toBe("/hero/hero-05.webp");
     warn.mockRestore();
   });
 
   it("hides controls when only one image is available", () => {
     renderCarousel(HERO_IMAGES.slice(0, 1));
-    expect(activeSrc()).toBe("/hero.png");
+    expect(activeSrc()).toBe("/hero/hero.webp");
     expect(screen.queryByRole("button", { name: "Next hero image" })).not.toBeInTheDocument();
   });
 });

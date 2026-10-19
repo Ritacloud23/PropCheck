@@ -58,8 +58,9 @@ function HeroPropertyCard() {
       <Image
         src={HERO_CARD_PHOTO}
         alt="Living room of a modern apartment"
-        width={1024}
-        height={455}
+        width={800}
+        height={355}
+        unoptimized
         sizes="(min-width: 1024px) 320px, 384px"
         className="h-auto w-full rounded-2xl bg-slate-100"
       />
@@ -98,8 +99,9 @@ const heroImages = HERO_IMAGES.filter((image) => {
   if (!found && process.env.NODE_ENV === "development") console.warn(`Hero image not found in public/: ${image.src}`);
   return found;
 });
-// Property photo shown inside the floating hero card (1024×455, cropped from hero-2.png to drop its baked-in badge and heart).
-const HERO_CARD_PHOTO = "/hero-2-cropped.png";
+// Property photo shown inside the floating hero card (cropped from hero-2.png to drop its baked-in badge and heart).
+// A web-sized copy of public/hero-2-cropped.png, made by scripts/optimize-hero-images.mjs.
+const HERO_CARD_PHOTO = "/hero/hero-2-cropped.webp";
 
 export default async function HomePage() {
   const [properties, reference] = await Promise.all([featured(), getReference()]);

@@ -98,6 +98,8 @@ export function HeroCarousel({
               src={image.src}
               alt={image.alt}
               fill
+              // Already web-sized; server-side resizing of hero photos was far too slow on small hosts.
+              unoptimized
               preload={image.src === images[0].src}
               sizes={sizes}
               className="object-cover"

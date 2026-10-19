@@ -47,5 +47,6 @@ next-env.d.ts
 !/public/hero-2-cropped.png
 !/public/hero-03-side-show.jpg
 !/public/hero-05.jpg
-# Brand assets the header uses.
+# Brand assets the header uses, and the web-sized hero copies the page serves.
 !/public/images/
+!/public/hero/
