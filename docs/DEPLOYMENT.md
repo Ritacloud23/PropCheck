@@ -43,7 +43,7 @@ Put the web app and the API behind HTTPS. Because the browser only talks to the 
 
 ## Render Blueprint
 
-`render.yaml` creates the database (`propcheck-db`), the API (`propcheck-api`) and the web app (`propcheck-web`) in Frankfurt on the free plan. Secrets are generated and `DATABASE_URL` is wired from the database. Render can't derive public URLs in a Blueprint, so it asks for these on creation:
+`render.yaml` creates the database (`propcheck-db`), a Key Value (Redis) instance for rate limits (`propcheck-redis`), the API (`propcheck-api`) and the web app (`propcheck-web`) in Frankfurt on the free plan. Secrets are generated, and `DATABASE_URL` and `REDIS_URL` are wired automatically. Render allows **one free Postgres per workspace**: delete an older free database first, or the Blueprint sync fails. Render can't derive public URLs in a Blueprint, so it asks for these on creation:
 
 | Prompt | Value |
 |---|---|

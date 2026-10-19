@@ -12,6 +12,14 @@ databases:
     ipAllowList: [] # private network only: the API is the only client
 
 services:
+  # Redis-compatible store for shared rate-limit counters (docs/RATE_LIMITING.md).
+  - type: keyvalue
+    name: propcheck-redis
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: volatile-lru # every rate-limit key has a TTL
+    ipAllowList: [] # private network only
+
   - type: web
     name: propcheck-api
     runtime: docker
@@ -28,6 +36,11 @@ services:
         fromDatabase:
           name: propcheck-db
           property: connectionString # postgresql://, converted to +asyncpg by app/config.py
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: propcheck-redis
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
       - key: FILE_SIGNING_SECRET
