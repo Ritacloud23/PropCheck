@@ -1,0 +1,70 @@
+# Render Blueprint: Postgres + FastAPI API + Next.js web. See docs/DEPLOYMENT.md ("Render Blueprint").
+# Values marked `sync: false` are asked for once, when the Blueprint is first created.
+# Public URLs can't be derived here (Render may add a suffix to a taken name), so they are prompts.
+
+databases:
+  - name: propcheck-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "16"
+    databaseName: propcheck
+    user: propcheck
+    ipAllowList: [] # private network only: the API is the only client
+
+services:
+  - type: web
+    name: propcheck-api
+    runtime: docker
+    plan: free
+    region: frankfurt # must match the database for its internal URL to resolve
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # No dockerCommand: the image's CMD runs `alembic upgrade head` before uvicorn.
+    healthCheckPath: /api/health
+    buildFilter:
+      paths: ["backend/**"]
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: propcheck-db
+          property: connectionString # postgresql://, converted to +asyncpg by app/config.py
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FILE_SIGNING_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: STORAGE_BACKEND
+        value: local
+      - key: STORAGE_DIR
+        value: /data/storage # not persistent on the free plan: uploads vanish on restart
+      - key: API_PUBLIC_URL
+        sync: false # this service's URL, e.g. https://propcheck-api.onrender.com
+      - key: FRONTEND_URL
+        sync: false # the web service's URL, e.g. https://propcheck-web.onrender.com
+      - key: CORS_ORIGINS
+        sync: false # same as FRONTEND_URL
+      - key: PAYSTACK_CALLBACK_URL
+        sync: false # <FRONTEND_URL>/dashboard/renter/reservations
+      # Optional, test keys only (sk_test_/pk_test_); leave empty for the payment simulator.
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+
+  - type: web
+    name: propcheck-web
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    healthCheckPath: /
+    buildFilter:
+      paths: ["frontend/**"]
+    envVars:
+      # Render passes env vars to the Docker build as build args; the /api rewrites are compiled in.
+      - key: API_INTERNAL_URL
+        sync: false # the API's public URL, no trailing slash, no /api
+      - key: FRONTEND_URL
+        sync: false # this service's URL

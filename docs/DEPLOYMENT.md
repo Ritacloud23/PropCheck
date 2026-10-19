@@ -41,6 +41,19 @@ Put the web app and the API behind HTTPS. Because the browser only talks to the 
 | `TRUSTED_PROXIES` | api | The address(es) of the web server / load balancer in front of the API, so per-IP limits see the visitor's IP. |
 | `API_INTERNAL_URL` | web (build + run) | How the web server reaches the API, e.g. `http://api:8000` or the private service URL |
 
+## Render Blueprint
+
+`render.yaml` creates the database (`propcheck-db`), the API (`propcheck-api`) and the web app (`propcheck-web`) in Frankfurt on the free plan. Secrets are generated and `DATABASE_URL` is wired from the database. Render can't derive public URLs in a Blueprint, so it asks for these on creation:
+
+| Prompt | Value |
+|---|---|
+| `API_PUBLIC_URL` (api), `API_INTERNAL_URL` (web) | the API's URL, e.g. `https://propcheck-api.onrender.com` |
+| `FRONTEND_URL` (api + web), `CORS_ORIGINS` (api) | the web URL, e.g. `https://propcheck-web.onrender.com` |
+| `PAYSTACK_CALLBACK_URL` | `<web URL>/dashboard/renter/reservations` |
+| `PAYSTACK_*_KEY` | empty (simulator) or test keys |
+
+URLs are `https://<service name>.onrender.com` unless the name is taken. If Render adds a suffix, correct the values afterwards and redeploy the web app with **Clear build cache & deploy**. Seed demo data from the API's **Shell**: `python -m app.seed`.
+
 ## Render notes
 
 - **Web service:** set `API_INTERNAL_URL` to the API's URL, e.g. `https://propcheck-1.onrender.com`, with no trailing slash and no `/api`. It is read at build time (rewrites) and at runtime (server-rendered pages), so after changing it use **Manual Deploy → Clear build cache & deploy**. If it is missing, the web server falls back to `http://localhost:8000` and pages fail with `TypeError: fetch failed` / `ECONNREFUSED`, so on Render (detected via its `RENDER` variable) `next.config.ts` now fails the build instead. The Docker image also carries the build-time value into the runtime stage as a default. There is no `NEXT_PUBLIC_` API variable on purpose: the browser only calls the web origin, which keeps the session cookie first-party.
